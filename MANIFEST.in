@@ -1,0 +1,3 @@
+include pyobfuscate MANIFEST.in pyobfuscate.spec LICENSE Makefile README TODO
+
+global-exclude *~ *.pyo *.pyc .cvsignore
