@@ -663,6 +663,7 @@ class PubApiExtractor:
     def __init__(self, source_no_encoding):
         ast = compiler.parse(source_no_encoding)
         self.pubapi = None
+        self.matches = 0
         compiler.walk(ast, self)
         if self.pubapi == None:
             # Didn't find __all__.
@@ -673,6 +674,10 @@ class PubApiExtractor:
             else:
                 self.pubapi = []
 
+        if self.matches > 1:
+            print >>sys.stderr, "Warning: Found multiple __all__ definitions"
+            print >>sys.stderr, "Using last definition"
+
 
     def visitAssign(self, node):
         for assnode in node.nodes:
@@ -681,13 +686,22 @@ class PubApiExtractor:
             
             if assnode.name == "__all__" \
                    and assnode.flags == compiler.consts.OP_ASSIGN:
-                namelist = node.expr.asList()
-                # namelist is like (('Popen',), ('PIPE',),
-                # ('STDOUT',), ('run',)). 
-                self.pubapi = map(lambda e: e[0], namelist)
-                # Note: We could possibly stop searching here, but
-                # then we might miss later __all__ assignments (which
-                # takes precendence)
+                self.matches += 1
+                self.pubapi = []
+                # Verify that the expression is a list
+                constant = isinstance(node.expr, compiler.ast.List)
+                if constant:
+                    # Verify that each element in list is a Const node.
+                    for node in node.expr.getChildNodes():
+                        if isinstance(node, compiler.ast.Const):
+                            self.pubapi.append(node.value)
+                        else:
+                            constant = False
+                            break
+
+                if not constant:
+                    print >>sys.stderr, "Error: __all__ is not a list of constants."
+                    sys.exit(1)
 
 
 
