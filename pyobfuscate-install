@@ -67,6 +67,8 @@ def main():
     print >>sys.stderr, "Calling", cmd
     retcode = os.system(cmd)
     os.chmod(dest, mode)
+    if retcode > 254:
+        retcode = 254
     sys.exit(retcode)
     
 
