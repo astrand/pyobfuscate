@@ -1,0 +1,1018 @@
+#!/usr/bin/env python
+
+import sys
+import types
+import symbol
+import token
+import tokenize
+import compiler
+import parser
+import random
+import symtable
+import StringIO
+import getopt
+import re
+
+TOKENBLANKS=1
+
+class NameTranslator:
+    def __init__(self):
+        self.realnames = {}
+        self.bogusnames = []
+
+
+    def get_name(self, name):
+        """Get a translation for a real name"""
+        if not self.realnames.has_key(name):
+            self.realnames[name] = self.gen_unique_name()
+        return self.realnames[name]
+
+
+    def get_bogus_name(self,):
+        """Get a random bogus name"""
+        if len(self.bogusnames) < 20:
+            newname = self.gen_unique_name()
+            self.bogusnames.append(newname)
+            return newname
+        else:
+            return random.choice(self.bogusnames)
+
+
+    def gen_unique_name(self):
+        """Generate a name that hasn't been used before;
+        not as a real name, not as a bogus name"""
+        existing_names = self.realnames.values() + self.bogusnames
+        name = ""
+        while 1:
+            name += self.gen_name()
+            if name not in existing_names:
+                break
+        return name
+        
+
+    def gen_name():
+        if random.choice((True, False)):
+            # Type ilII1ili1Ilil1il1Ilili1
+            chars = ("i", "I", "1")
+        else:
+            # Type oooOo0oOo00oOO0o0O0
+            chars = ("o", "O", "0")
+
+        # Name must'nt begin with a number
+        result = random.choice(chars[:2])
+        for x in range(random.randint(1, 12)):
+            result += random.choice(chars)
+        return result
+    gen_name = staticmethod(gen_name)
+        
+    
+
+class LambdaSymTable:
+    def __init__(self, symtab, argnames):
+        # Well, lambdas have no name, so they are safe to obfuscate...
+        self.obfuscated = 1
+        self.symtab = symtab
+        self.mysymbs = {}
+        for argname in argnames:
+            self.mysymbs[argname] = symtable.Symbol(argname, symtable.DEF_PARAM)
+
+
+    def lookup(self, name):
+        lsymb = self.mysymbs.get(name)
+        if lsymb:
+            return lsymb
+        else:
+            return self.symtab.lookup(name)
+
+
+    def get_type(self):
+        return self.symtab.get_type()
+
+    
+
+class CSTWalker:
+    def __init__(self, source_no_encoding, pubapi):
+        # Our public API (__all__)
+        self.pubapi = pubapi
+        # Names of imported modules
+        self.modnames = []
+        self.symtab = symtable.symtable(source_no_encoding, "-", "exec")
+        cst = parser.suite(source_no_encoding)
+        elements = parser.ast2tuple(cst, line_info=1)
+        self.names = {}
+        self.walk(elements, [self.symtab])
+        
+
+
+    def getNames(self):
+        return self.names
+
+
+    def addToNames(self, line, name, doreplace):
+        namedict = self.names.get(line, {})
+        if not namedict:
+            self.names[line] = namedict
+
+        occurancelist = namedict.get(name, [])
+        if not occurancelist:
+            namedict[name] = occurancelist
+
+        occurancelist.append(doreplace)
+
+
+    def res_name(self, name):
+        if name.startswith("__") and name.endswith("__"):
+            return 1
+        if name in self.modnames:
+            return 1
+        if hasattr(__builtins__, name):
+            return 1
+        return 0
+
+
+    def walk(self, elements, symtabs):
+        # We are not interested in terminal tokens
+        if type(elements) != types.TupleType:
+            return
+        if token.ISTERMINAL(elements[0]):
+            return
+ 
+        production = elements[0]
+        if production == symbol.funcdef:
+            self.handle_funcdef(elements, symtabs)
+        elif production == symbol.varargslist:
+            self.handle_varargslist(elements, symtabs)
+        elif production == symbol.fpdef:
+            self.handle_fpdef(elements, symtabs)
+        elif production == symbol.import_as_name:
+            self.handle_import_as_name(elements, symtabs)
+        elif production == symbol.dotted_as_name:
+            self.handle_dotted_as_name(elements, symtabs)
+        elif production == symbol.dotted_name:
+            self.handle_dotted_name(elements, symtabs)
+        elif production == symbol.global_stmt:
+            self.handle_global_stmt(elements, symtabs)
+        elif production == symbol.atom:
+            self.handle_atom(elements, symtabs)
+        elif production == symbol.trailer:
+            self.handle_trailer(elements, symtabs)
+        elif production == symbol.classdef:
+            self.handle_classdef(elements, symtabs)
+        elif production == symbol.argument:
+            self.handle_argument(elements, symtabs)
+        elif production == symbol.lambdef:
+            self.handle_lambdef(elements, symtabs)
+        else:
+            for node in elements:
+                self.walk(node, symtabs)
+
+
+    def handle_funcdef(self, elements, symtabs):
+        # funcdef: 'def' NAME parameters ':' suite
+        # elements is something like:
+        # (259, (1, 'def', 6), (1, 'f', 6), (260, ...
+        name = elements[2]
+        assert name[0] == token.NAME
+        id = name[1]
+        line = name[2]
+
+        tab = symtabs[-1]
+        if self.res_name(id):
+            obfuscate = 0
+        else:
+            tabtype = tab.get_type()
+            if tabtype == "module":
+                # Toplevel. Check with pubapi.
+                obfuscate = id not in self.pubapi
+            elif tabtype == "class":
+                # This is a method
+                # FIXME: We cannot obfuscate methods right now,
+                # because we cannot handle calls like obj.meth(),
+                # since we do not know the type of obj. 
+                #classname = tab.get_name()
+                #obfuscate = classname not in self.pubapi
+                obfuscate = 0
+            else:
+                # OK to obfuscate
+                obfuscate = 1
+
+        # Set a flag on the SymbolTable object to indicate if this
+        # block name is obfuscated or not.
+        functab = tab.lookup(id).get_namespace()
+        functab.obfuscated = obfuscate
+        
+        self.addToNames(line, id, obfuscate)
+
+        for node in elements:
+            self.walk(node, symtabs + [functab])
+
+
+    def handle_varargslist(self, elements, symtabs):
+        # varargslist: (fpdef ['=' test] ',')* ('*' NAME [',' '**' NAME] | '**' NAME) ...
+        # elements is something like:
+        # (261, (262, (1, 'XXX', 37)), (12, ',', 37), (262, (1, 'bar', 38)), (22, '=', 38), (292, (293, (294,
+        # The purpose of this method is to find vararg and kwarg names
+        # (which are not fpdefs).
+        tab = symtabs[-1]
+        obfuscate = tab.obfuscated
+
+        next_is_name = False
+        for tok in elements:
+            if type(tok) != types.TupleType:
+                continue
+
+            toktype = tok[0]
+            if next_is_name:
+                assert tok[0] == token.NAME
+                id = tok[1]
+                line = tok[2]
+                self.addToNames(line, id, obfuscate)
+                next_is_name = False
+            elif toktype in [token.STAR, token.DOUBLESTAR]:
+                next_is_name = True
+            elif toktype == symbol.fpdef:
+                self.handle_fpdef(tok, symtabs)
+
+
+    def handle_fpdef(self, elements, symtabs):
+        # fpdef: NAME | '(' fplist ')'
+        # elements is something like:
+        # (262, (1, 'self', 13))
+        tab = symtabs[-1]
+        
+        name = elements[1]
+        assert name[0] == token.NAME
+        id = name[1]
+        line = name[2]
+
+        if self.res_name(id):
+            obfuscate = 0
+        else:
+            obfuscate = tab.obfuscated
+
+        self.addToNames(line, id, obfuscate)
+        for node in elements:
+            self.walk(node, symtabs)
+
+
+    def handle_import_as_name(self, elements, symtabs):
+        # import_as_name: NAME [NAME NAME]
+        # elements is something like:
+        # (279, (1, 'format_tb', 11))
+        # or
+        # (279, (1, 'format_tb', 11), (1, 'as', 11), (1, 'ftb', 11))
+        name1 = elements[1]
+        assert name1[0] == token.NAME
+        id1 = name1[1]
+        line1 = name1[2]
+        self.addToNames(line1, id1, 0)
+
+        if len(elements) > 2:
+            assert len(elements) == 4
+
+            name2 = elements[2]
+            assert name2[0] == token.NAME
+            id2 = name2[1]
+            assert id2 == "as"
+            line2 = name2[2]
+            self.addToNames(line2, id2, 0)
+
+            name3 = elements[3]
+            assert name3[0] == token.NAME
+            id3 = name3[1]
+            line3 = name3[2]
+            # FIXME: Later, obfuscate if scope/pubabi etc OK
+            self.addToNames(line3, id3, 0)
+            self.modnames.append(id3)
+            
+        for node in elements:
+            self.walk(node, symtabs)
+            
+
+    def handle_dotted_as_name(self, elements, symtabs):
+        # dotted_as_name: dotted_name [NAME NAME]
+        # elements is something like:
+        # (280, (281, (1, 'os', 2)))
+        # or
+        # (280, (281, (1, 'traceback', 11)), (1, 'as', 11), (1, 'tb', 11))
+        # handle_dotted_name takes care of dotted_name
+        dotted_name = elements[1]
+
+        modname = dotted_name[1]
+        assert modname[0] == token.NAME
+        mod_id = modname[1]
+        mod_line = modname[2]
+        self.addToNames(mod_line, mod_id, 0)
+        self.modnames.append(mod_id)
+
+        if len(elements) > 2:
+            # import foo as bar ...
+            assert len(elements) == 4
+
+            asname = elements[2]
+            assert asname[0] == token.NAME
+            asid = asname[1]
+            assert asid == "as"
+            asline = asname[2]
+            self.addToNames(asline, asid, 0)
+
+            name = elements[3]
+            assert name[0] == token.NAME
+            id = name[1]
+            line = name[2]
+            # FIXME: Later, obfuscate if scope/pubabi etc OK
+            self.addToNames(line, id, 0)
+            self.modnames.append(id)
+            
+        for node in elements:
+            self.walk(node, symtabs)
+
+
+    def handle_dotted_name(self, elements, symtabs):
+        # dotted_name: NAME ('.' NAME)*
+        # elements is something like:
+        # (281, (1, 'os', 2))
+        # or
+        # (281, (1, 'compiler', 11), (23, '.', 11), (1, 'ast', 11))
+        # or
+        # (281, (1, 'bike', 11), (23, '.', 11), (1, 'bikefacade', 11), (23, '.', 11), (1, 'visitor', 11))
+        name = elements[1]
+        assert name[0] == token.NAME
+        id = name[1]
+        line = name[2]
+        self.addToNames(line, id, 0)
+
+        # Sequence length should be even
+        assert (len(elements) % 2 == 0)
+        for x in range(2, len(elements), 2):
+            dot = elements[x]
+            name = elements[x+1]
+            
+            assert dot[0] == token.DOT
+            assert name[0] == token.NAME
+            id = name[1]
+            line = name[2]
+            self.addToNames(line, id, 0)
+        for node in elements:
+            self.walk(node, symtabs)
+        
+
+    def handle_global_stmt(self, elements, symtabs):
+        # global_stmt: 'global' NAME (',' NAME)*
+        # elements is something like:
+        # (282, (1, 'global', 41), (1, 'foo', 41))
+        # or
+        # (282, (1, 'global', 32), (1, 'aaaa', 32), (12, ',', 32), (1, 'bbbb', 32))
+        gname = elements[1]
+        assert gname[0] == token.NAME
+        gid = gname[1]
+        assert gid == "global"
+
+        name1 = elements[2]
+        assert name1[0] == token.NAME
+        id1 = name1[1]
+        line1 = name1[2]
+        obfuscate = id1 not in self.pubapi
+        self.addToNames(line1, id1, obfuscate)
+
+        # Sequence length should be odd
+        assert (len(elements) % 2)
+        for x in range(3, len(elements), 2):
+            comma = elements[x]
+            name = elements[x+1]
+            assert comma[0] == token.COMMA
+            assert name[0] == token.NAME
+            id = name[1]
+            line = name[2]
+            obfuscate = id not in self.pubapi
+            self.addToNames(line, id, 0)
+        for node in elements:
+            self.walk(node, symtabs)
+        
+
+    def handle_atom(self, elements, symtabs):
+        # atom: ... | NAME | ...
+        # elements is something like:
+        # (305, (1, 'os', 15))
+        name = elements[1]
+        if name[0] == token.NAME:
+            id = name[1]
+            line = name[2]
+
+            tab = symtabs[-1]
+
+            if self.res_name(id):
+                obfuscate = 0
+            else:
+                s = tab.lookup(id)
+
+                if s.is_imported():
+                    obfuscate = 0
+                elif s.is_parameter() or s.is_vararg() or s.is_keywordarg():
+                    obfuscate = tab.obfuscated
+                elif s.is_local():
+                    tabtype = tab.get_type()
+                    if tabtype == "module":
+                        # Toplevel. Check with pubapi.
+                        obfuscate = id not in self.pubapi
+                    elif tabtype == "function":
+                        # Function/method. Always OK.
+                        obfuscate = 1
+                    elif tabtype == "class":
+                        # This is a class variable. 
+                        #classname = tab.get_name()
+                        #obfuscate = classname not in self.pubapi
+                        # FIXME: See comment in handle_funcdef
+                        obfuscate = 0
+                    else:
+                        raise RuntimeError("Internal Error")
+                elif s.is_global():
+                    topsymtab = symtabs[0]
+                    isglobal = 0
+                    if id in topsymtab.get_identifiers():
+                        topsym = topsymtab.lookup(id)
+                        isglobal = topsym.is_global() \
+                                   or topsym.is_local() \
+                                   or topsym.is_assigned() \
+
+                    if isglobal:
+                        obfuscate = id not in self.pubapi
+                    else:
+                        # Probably a symbol from import *
+                        obfuscate = 0
+                elif s.is_referenced():
+                    # Strange. Not global, not local, nor some form of
+                    # parameter. I would say that this is SF bug
+                    # 896061. Try to explicitly look in the top level
+                    # namespace. 
+                    topsymtab = symtabs[0]
+                    isglobal = 0
+                    if id in topsymtab.get_identifiers():
+                        topsym = topsymtab.lookup(id)
+                        if topsym.is_assigned():
+                            isglobal = 1
+
+                    if isglobal:
+                        obfuscate = id not in self.pubapi
+                    else:
+                        # Probably a symbol from import *
+                        obfuscate = 0
+                else:
+                    print >>sys.stderr, "WARNING: Insufficient information about symbol", id
+                    obfuscate = 0
+
+            self.addToNames(line, id, obfuscate)
+            
+        for node in elements:
+            self.walk(node, symtabs)
+
+
+    def handle_trailer(self, elements, symtabs):
+        # trailer: ... | '.' NAME
+        # elements is something like:
+        # (308, (23, '.', 33), (1, 'poll', 33))
+        trailer = elements[1]
+        if trailer[0] == token.DOT:
+            name = elements[2]
+            assert name[0] == token.NAME
+            id = name[1]
+            line = name[2]
+            # FIXME: Sometimes, in the future, perhaps obfuscate. This is
+            # hard!
+            self.addToNames(line, id, 0)
+        for node in elements:
+            self.walk(node, symtabs)
+
+
+    def handle_classdef(self, elements, symtabs):
+        # classdef: 'class' NAME ['(' testlist ')'] ':' suite
+        # elements is something like:
+        # (316, (1, 'class', 48), (1, 'SuperMyClass', 48), (11, ':', 48),
+        name = elements[2]
+        assert name[0] == token.NAME
+        id = name[1]
+        line = name[2]
+
+        tab = symtabs[-1]
+        if self.res_name(id):
+            obfuscate = 0
+        else:
+            tabtype = tab.get_type()
+            if tabtype == "module":
+                # Toplevel. Check with pubapi.
+                obfuscate = id not in self.pubapi
+            elif tabtype == "class":
+                # Gosh, a class in a class. Check with pubapi. 
+                obfuscate = id not in self.pubapi
+            else:
+                # Function/method. OK to obfuscate. 
+                obfuscate = 1
+        
+        self.addToNames(line, id, obfuscate)
+
+        aftername = elements[3]
+        # Should be either a colon or left paren
+        assert aftername[0] in (token.COLON, token.LPAR)
+        if aftername[0] == token.LPAR:
+            # This class is inherited
+            testlist = elements[4]
+            assert testlist[0] == symbol.testlist
+            # Parsing of testlist should be done in the original scope
+            for node in testlist:
+                self.walk(node, symtabs)
+            elements = elements[5:]
+            
+        classtab = tab.lookup(id).get_namespace()
+        
+        for node in elements:
+            self.walk(node, symtabs + [classtab])
+
+
+    def handle_argument(self, elements, symtabs):
+        # argument: [test '='] test       # Really [keyword '='] test
+        # elements is like:
+        # (318, (292, (293, (294, (295, (297, (298, (299, (300, (301,
+        # (302, (303, (304, (305, (3, '"SC_OPEN_MAX"', 15
+        if len(elements) < 3:
+            # handle_atom can handle this...
+            pass
+        else:
+            # keyword=test
+            # FIXME: A bit ugly...
+            keyword = elements[1][1][1][1][1][1][1][1][1][1][1][1][1][1]
+            assert keyword[0] == token.NAME
+            keyword_id = keyword[1]
+            keyword_line = keyword[2]
+
+            # It's not possible to look up keyword in our symbol
+            # table. Obfuscate keyword if the function we are trying
+            # to call is obfuscated.
+            # FIXME: Implement.
+            self.addToNames(keyword_line, keyword_id, 0)
+
+            eq = elements[2]
+            assert eq[0] == token.EQUAL
+
+            # Let handle_atom handle the rest.
+            elements = elements[3]
+
+        for node in elements:
+            self.walk(node, symtabs)
+
+
+    def handle_lambdef(self, elements, symtabs):
+        # lambdef: 'lambda' [varargslist] ':' test
+        # elements is like:
+        # (307, (1, 'lambda', 588), (261, (262, (1, 'e', 588))), (11, ':', 588)
+        # or
+        # (307, (1, 'lambda', 40), (11, ':', 40), (292 ...
+        if elements[2][0] == token.COLON:
+            # There are no lambda arguments. Simple! The parsing of
+            # the test part can be done using the current symbol
+            # table.
+            test = elements[3]
+            for node in test:
+                self.walk(node, symtabs)
+        else:
+            # The more common case: You have a varargslist.
+            varargslist = elements[2]
+
+            # Part 1: Deal with varargslist. Fetch the names of the
+            # arguments. Construct a LambdaSymTable.
+            arguments = self.get_varargs_names(varargslist)
+            for line, name in arguments:
+                self.addToNames(line, name, 1)
+
+            tab = symtabs[-1]
+            argnames = [e[1] for e in arguments]
+            lambdatab = LambdaSymTable(tab, argnames)
+
+            # Part 2: Parse the 'test' part, using the LambdaSymTable.
+            test = elements[4]
+            for node in test:
+                self.walk(node, symtabs + [lambdatab])
+
+
+    def get_varargs_names(elements):
+        """Extract all argument names and lines from varargslist"""
+        result = []
+
+        next_is_name = False
+        for tok in elements:
+            if type(tok) != types.TupleType:
+                continue
+
+            toktype = tok[0]
+            if next_is_name:
+                assert tok[0] == token.NAME
+                id = tok[1]
+                line = tok[2]
+                result.append((line, id))
+                next_is_name = False
+            elif toktype in [token.STAR, token.DOUBLESTAR]:
+                next_is_name = True
+            elif toktype == symbol.fpdef:
+                result.extend(CSTWalker.get_fpdef_names(tok))
+
+        return result
+
+    get_varargs_names = staticmethod(get_varargs_names)
+
+
+    def get_fpdef_names(elements):
+        """Extract all argument names from fpdef"""
+        result = []
+
+        # We are not interested in terminal tokens
+        if type(elements) != types.TupleType:
+            return result
+        if token.ISTERMINAL(elements[0]):
+            return result
+
+        name = elements[1]
+        assert name[0] == token.NAME
+        id = name[1]
+        line = name[2]
+        result.append((line, id))
+        for node in elements:
+            result.extend(CSTWalker.get_fpdef_names(node))
+        return result
+
+    get_fpdef_names = staticmethod(get_fpdef_names)
+
+ 
+
+class PubApiExtractor:
+    def __init__(self, source_no_encoding):
+        ast = compiler.parse(source_no_encoding)
+        self.pubapi = None
+        compiler.walk(ast, self)
+        if self.pubapi == None:
+            # Didn't find __all__.
+            if conf.allpublic:
+                symtab = symtable.symtable(source_no_encoding, "-", "exec")
+                self.pubapi = filter(lambda s: s[0] != "_",
+                                     symtab.get_identifiers())
+            else:
+                self.pubapi = []
+
+
+    def visitAssign(self, node):
+        for assnode in node.nodes:
+            if not isinstance(assnode, compiler.ast.AssName):
+                continue
+            
+            if assnode.name == "__all__" \
+                   and assnode.flags == compiler.consts.OP_ASSIGN:
+                namelist = node.expr.asList()
+                # namelist is like (('Popen',), ('PIPE',),
+                # ('STDOUT',), ('run',)). 
+                self.pubapi = map(lambda e: e[0], namelist)
+                # Note: We could possibly stop searching here, but
+                # then we might miss later __all__ assignments (which
+                # takes precendence)
+
+
+
+class ColumnExtractor:
+    def __init__(self, source, names):
+
+        self.indent = 0
+        self.first_on_line = 1
+        # How many times have we seen this symbol on this line before?
+        self.symboltimes = {}
+        self.names = names
+        # Dictionary indexed on (row, column), containing name
+        self.result = {}
+        # To detect line num changes; backslash constructs doesn't
+        # generate any token
+        self.this_lineno = 1
+        f = StringIO.StringIO(source)
+        self.parse(f)
+
+
+    def parse(self, f):
+        for tok in tokenize.generate_tokens(f.readline):
+            t_type, t_string, t_srow_scol, t_erow_ecol, t_line = tok
+
+            assert self.this_lineno <= t_srow_scol[0]
+            if self.this_lineno < t_srow_scol[0]:
+                # Gosh, line has skipped. This must be due to an
+                # ending backslash.
+                self.this_lineno = t_srow_scol[0]
+                self.symboltimes = {}
+
+            if t_type in [tokenize.NL, tokenize.NEWLINE]:
+                self.this_lineno += 1
+                self.symboltimes = {}
+            elif t_type == tokenize.NAME:
+                srow = t_srow_scol[0]
+                scol = t_srow_scol[1]
+                namedict = self.names.get(srow)
+                if namedict:
+                    # There are interesting symbols on this line
+                    occurancelist = namedict.get(t_string)
+                    if occurancelist:
+                        # This symbol is interesting
+                        seen_times = self.saw_symbol(t_string)
+
+                        # If this assertion fails, then step 1 failed
+                        # to find all names. 
+                        assert len(occurancelist) > seen_times
+                        if occurancelist[seen_times]:
+                            # This occurance should be obfuscated.
+                            assert self.result.get((srow, scol)) == None
+                            self.result[(srow, scol)] = t_string
+
+
+    def saw_symbol(self, name):
+        """Update self.symboltimes, when we have seen a symbol
+        Return the current seen_times for this symbol"""
+        seen_times = self.symboltimes.get(name, -1)
+        seen_times += 1
+        self.symboltimes[name] = seen_times
+        return seen_times
+
+
+
+class TokenPrinter:
+    AFTERCOMMENT = 0
+    INSIDECOMMENT = 1
+    BEFORECOMMENT = 2
+    
+    def __init__(self, source, names):
+        self.indent = 0
+        self.first_on_line = 1
+        self.symboltimes = {}
+        self.names = names
+        self.nametranslator = NameTranslator()
+        # Pending, obfuscated noop lines. We cannot add the noop lines
+        # until we know what comes after. 
+        self.pending = []
+        self.pending_indent = 0
+        # To detect line num changes; backslash constructs doesn't
+        # generate any token
+        self.this_lineno = 1
+        self.pending_newlines = 0
+        # Skip next token?
+        self.skip_token = 0
+        # Comment state. One of AFTERCOMMENT, INSIDECOMMENT, BEFORECOMMENT
+        if conf.firstcomment:
+            self.commentstate = TokenPrinter.AFTERCOMMENT
+        else:
+            self.commentstate = TokenPrinter.BEFORECOMMENT
+        f = StringIO.StringIO(source)
+        self.play(f)
+
+
+    def play(self, f):
+        for tok in tokenize.generate_tokens(f.readline):
+            t_type, t_string, t_srow_scol, t_erow_ecol, t_line = tok
+
+            #print >>sys.stderr, "TTTT", tokenize.tok_name[t_type], repr(t_string), self.this_lineno, t_srow_scol[0]
+
+            if self.skip_token:
+                self.skip_token = 0
+                continue
+
+            # Make sure we keep line numbers
+            # line numbers may not decrease
+            assert self.this_lineno <= t_srow_scol[0]
+            if self.this_lineno < t_srow_scol[0]:
+                # Gosh, line has skipped. This must be due to an
+                # ending backslash.
+                self.pending_newlines += t_srow_scol[0] - self.this_lineno
+                self.this_lineno = t_srow_scol[0]
+
+            if t_type == tokenize.NL:
+                if self.first_on_line and conf.blanks != conf.KEEP_BLANKS:
+                    self.pending.append(self.gen_noop_line() + "\n")
+                    self.pending_indent = self.indent
+                else:
+                    sys.stdout.write("\n")
+                self.this_lineno += 1
+                if self.commentstate == TokenPrinter.INSIDECOMMENT:
+                    self.commentstate = TokenPrinter.AFTERCOMMENT
+                
+            elif t_type == tokenize.NEWLINE:
+                for x in range(self.pending_newlines):
+                    if conf.blanks != conf.KEEP_BLANKS:
+                        self.pending.append(self.gen_noop_line() + "\n")
+                        self.pending_indent = self.indent
+                    else:
+                        sys.stdout.write("\n")
+                
+                self.pending_newlines = 0
+                self.first_on_line = 1
+                self.this_lineno += 1
+                sys.stdout.write("\n")
+                if self.commentstate == TokenPrinter.INSIDECOMMENT:
+                    self.commentstate = TokenPrinter.AFTERCOMMENT
+                    
+            elif t_type == tokenize.INDENT:
+                self.indent += conf.indent
+            elif t_type == tokenize.DEDENT:
+                self.indent -= conf.indent
+            elif t_type == tokenize.COMMENT:
+                if self.commentstate == TokenPrinter.BEFORECOMMENT:
+                    self.commentstate = TokenPrinter.INSIDECOMMENT
+                
+                if self.first_on_line:
+                    if self.commentstate in [TokenPrinter.BEFORECOMMENT, TokenPrinter.INSIDECOMMENT]:
+                        # Output comment unmodified
+                        self.line_append(t_string)
+                    elif conf.blanks != conf.KEEP_BLANKS:
+                        self.pending.append(self.gen_noop_line() + "\n")
+                        self.pending_indent = self.indent
+                    else:
+                        sys.stdout.write("\n")
+                        
+                    self.this_lineno += 1
+                # tokenizer does not generate a NEWLINE after comment
+                self.first_on_line = 1
+            elif t_type == tokenize.STRING:
+                if self.first_on_line:
+                    # Skip over docstrings
+                    # FIXME: This simple approach fails with:
+                    # "foo"; print 3
+                    self.skip_token = 1
+                else:
+                    self.line_append(t_string)
+            elif t_type == tokenize.NAME:
+                (srow, scol) = t_srow_scol
+                if self.names.get(t_srow_scol):
+                    t_string = self.nametranslator.get_name(t_string)
+
+                self.line_append(t_string)
+            else:
+                self.line_append(t_string)
+                
+
+    def line_append(self, s):
+        if self.pending:
+            indent = max(self.indent, self.pending_indent)
+            self.pending = map(lambda row: " "*indent + row,
+                               self.pending)
+            if conf.blanks == conf.OBFUSCATE_BLANKS:
+                sys.stdout.write(''.join(self.pending))
+            self.pending = []
+        
+        if self.first_on_line:
+            sys.stdout.write(" "*self.indent)
+        else:
+            sys.stdout.write(" "*TOKENBLANKS)
+        sys.stdout.write(s)
+        self.first_on_line = 0
+
+
+    def gen_noop_line(self):
+        testint = random.randint(1, 100)
+        num_words = random.randint(1, 6)
+        result = "if %d - %d: " % (testint, testint)
+        for x in range(num_words - 1):
+            op = random.choice((".", "/", "+", "-", "%", "*"))
+            result += self.nametranslator.get_bogus_name() + " %s " % op
+        result += self.nametranslator.get_bogus_name()
+        return result
+
+
+
+def strip_encoding(source):
+    f = StringIO.StringIO(source)
+    lines = [f.readline(), f.readline()]
+    buf = ""
+    for line in lines:
+        if re.search("coding[:=]\s*([-\w_.]+)", line):
+            if line.strip().startswith("#"):
+                # Add a empty line instead
+                buf += "\n"
+            else:
+                # Gosh, not a comment.
+                print >>sys.stderr, "ERROR: Python 2.3 with coding declaration in non-comment!"
+                sys.exit(1)
+        else:
+            # Coding declaration not found on this line; add
+            # unmodified
+            buf += line
+
+    return buf + f.read()
+
+
+
+def usage():
+    print >>sys.stderr, """
+Usage:
+    
+pyobfuscate [options] <file>
+
+Options:
+
+-h, --help              Print this help.     
+-i, --indent <num>      Indentation to use. Default is 1. 
+-s, --seed <seed>       Seed to use for name randomization. Default is
+                        system time. 
+-r, --removeblanks      Remove blank lines, instead of obfuscate
+-k, --keepblanks        Keep blank lines, instead of obfuscate
+-f, --firstcomment      Remove first block of comments as well
+-a, --allpublic	        When __all__ is missing, assume everything is public.
+                        The default is to assume nothing is public. 
+-v, --verbose	        Verbose mode.
+"""
+
+
+class Configuration:
+    KEEP_BLANKS = 0
+    OBFUSCATE_BLANKS = 1
+    REMOVE_BLANKS = 2
+    
+    def __init__(self):
+        try:
+            opts, args = getopt.getopt(sys.argv[1:], "hi:s:rkfav",
+                                       ["help", "indent=", "seed=", "removeblanks"
+                                        "keepblanks", "firstcomment", "allpublic",
+                                        "verbose"])
+            if len(args) != 1:
+                raise getopt.GetoptError("A filename is required", "")
+        except getopt.GetoptError, e:
+            print >>sys.stderr, "Error:", e
+            usage()
+            sys.exit(2)
+
+        self.file = args[0]
+        self.indent = 1
+        self.seed = 42
+        self.blanks = self.OBFUSCATE_BLANKS
+        self.firstcomment = False
+        self.allpublic = False
+        self.verbose = False
+
+        for o, a in opts:
+            if o in ("-h", "--help"):
+                usage()
+                sys.exit()
+            if o in ("-i", "--indent"):
+                self.indent = int(a)
+            if o in ("-s", "--seed"):
+                self.seed = a
+            if o in ("-r", "--removeblanks"):
+                self.blanks = self.REMOVE_BLANKS
+            if o in ("-k", "--keepblanks"):
+                self.blanks = self.KEEP_BLANKS
+            if o in ("-f", "--firstcomment"):
+                self.firstcomment = True
+            if o in ("-a", "--allpublic"):
+                self.allpublic = True
+            if o == ("-v", "--verbose"):
+                self.verbose = True
+
+    
+
+def main():
+    global conf
+    conf = Configuration()
+    random.seed(conf.seed)
+
+    source = open(conf.file).read()
+
+    if sys.version_info[:2] == (2, 3):
+        # Enable Python 2.3 workaround for bug 898271.
+        source_no_encoding = strip_encoding(source)
+    else:
+        source_no_encoding = source
+        
+
+    # Step 1: Extract __all__ from source. 
+    pae = PubApiExtractor(source_no_encoding)
+
+
+    # Step 2: Walk the CST tree. The result of this step is a
+    # dictionary indexed on line numbers, which contains dictionaries
+    # indexed on symbols, which contains a list of the occurances of
+    # this symbol on this line. A 1 in this list means that the
+    # occurance should be obfuscated; 0 means not. Example: {64:
+    # {'foo': [0, 1], 'run': [0]}
+    cw = CSTWalker(source_no_encoding, pae.pubapi)
+
+
+    # Step 3: We need those column numbers! Use the tokenize module to
+    # step through the source code to gather this information. The
+    # result of this step is a dictionary indexed on tuples (row,
+    # column), which contains the symbol names. Example: {(55, 6):
+    # 'MyClass'} Only symbols that should be replaced are returned.
+    # (This step could perhaps be merged with step 4, but there are
+    # two reasons for not doing so: 1) Make each step less
+    # complicated. 2) If we want to use BRM some day, then we'll need
+    # the column numbers.)
+    ce = ColumnExtractor(source, cw.names)
+
+
+    # Step 4: Play the tokenizer game! Step through the source
+    # code. Obfuscate those symbols gathered earlier. Change
+    # indentation, blank lines etc.
+    TokenPrinter(source, ce.result)
+    
+    
+
+if __name__ == "__main__":
+    main()
+
