@@ -129,6 +129,11 @@ class ObfuscateTest(unittest.TestCase):
         (stdout, stderr) = p.communicate()
         assert -1 != stderr.find("__all__ is not a list of constants"), "pyobufscate didn't bail out with an error on file with dynamic __all__"
 
+    def test_global_stmt(self):
+        """Verify use of 'global' keyword"""
+        assert 42 == self.obfuscate_and_run_file("testfiles/global.py"), "Incorrect value returned after obfuscation"
+        
+
 
                                  
 
