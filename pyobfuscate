@@ -873,6 +873,7 @@ class TokenPrinter:
                     self.skip_token = 1
                 else:
                     self.line_append(t_string)
+                    self.this_lineno += t_string.count("\n")
             elif t_type == tokenize.NAME:
                 (srow, scol) = t_srow_scol
                 if self.names.get(t_srow_scol):
