@@ -18,7 +18,8 @@ original source code to customers.
 Several obfuscators for other languages, like Java, already
 exists. With Python, the problem is even more severe than with Java,
 because Python bytecode is not compatible between different Python
-versions.
+versions. Also, bytecode is very easy to "decompile" to source code by
+using "decompyle": http://www.crazy-compilers.com/decompyle/.
 
 If shipping original source code is the only option for distributing
 Python applications, then many vendors might choose another
