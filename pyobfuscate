@@ -660,11 +660,23 @@ class CSTWalker:
  
 
 class PubApiExtractor:
-    def __init__(self, source_no_encoding):
+    """Find the defintion of __all__, if any. It's not possible to
+    simply find the __all__ definition, since __all__ might be
+    calculated. So, we must execute the module. OTOH, we shouldn't do
+    this on simple scripts. So, our strategi is to check if __all__ is
+    defined, and in that case, execute, and read the __all__
+    definition."""
+    def __init__(self, source_no_encoding, filename):
         ast = compiler.parse(source_no_encoding)
         self.pubapi = None
+        self.allfound = False
         compiler.walk(ast, self)
-        if self.pubapi == None:
+
+        if self.allfound:
+            g = l = {}
+            execfile(filename, g, l)
+            self.pubapi = l["__all__"]
+        else:
             # Didn't find __all__.
             if conf.allpublic:
                 symtab = symtable.symtable(source_no_encoding, "-", "exec")
@@ -678,17 +690,10 @@ class PubApiExtractor:
         for assnode in node.nodes:
             if not isinstance(assnode, compiler.ast.AssName):
                 continue
-            
+
             if assnode.name == "__all__" \
                    and assnode.flags == compiler.consts.OP_ASSIGN:
-                namelist = node.expr.asList()
-                # namelist is like (('Popen',), ('PIPE',),
-                # ('STDOUT',), ('run',)). 
-                self.pubapi = map(lambda e: e[0], namelist)
-                # Note: We could possibly stop searching here, but
-                # then we might miss later __all__ assignments (which
-                # takes precendence)
-
+                self.allfound = True
 
 
 class ColumnExtractor:
@@ -999,7 +1004,7 @@ def main():
         
 
     # Step 1: Extract __all__ from source. 
-    pae = PubApiExtractor(source_no_encoding)
+    pae = PubApiExtractor(source_no_encoding, conf.file)
 
 
     # Step 2: Walk the CST tree. The result of this step is a
