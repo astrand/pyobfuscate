@@ -466,7 +466,11 @@ class CSTWalker:
                     isglobal = 0
                     if id in topsymtab.get_identifiers():
                         topsym = topsymtab.lookup(id)
-                        if topsym.is_assigned():
+                        if topsym.is_imported():
+                            # Perhaps a symbol "bar", from "from foo
+                            # import bar" Do not obfuscate.
+                            pass
+                        elif topsym.is_assigned():
                             isglobal = 1
 
                     if isglobal:
