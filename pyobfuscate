@@ -163,7 +163,7 @@ class CSTWalker:
         if tabtype == "module":
             # Toplevel. Check with pubapi.
             return id not in self.pubapi
-        elif tabtype == "class":
+        elif tabtype == "class" or tabtype == "function":
             # This is a method (or, perhaps, a class in a class)
             # FIXME: We cannot obfuscate methods right now,
             # because we cannot handle calls like obj.meth(),
