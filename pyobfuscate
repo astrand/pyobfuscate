@@ -478,6 +478,10 @@ class CSTWalker:
                         else:
                             # Probably a symbol from import *
                             obfuscate = 0
+                    else:
+                        # Not in topsymtab.get_identifiers. Probably
+                        # from "import *"
+                        obfuscate = 0
                 else:
                     print >>sys.stderr, "WARNING: Insufficient information about symbol", id
                     obfuscate = 0
