@@ -15,4 +15,4 @@ dist:
 # We distribute a .spec file, so that it's possible to run "rpm -ta pyobfuscate.tgz"
 	./setup.py bdist_rpm --spec-only
 	mv dist/pyobfuscate.spec .
-	./setup.py sdist
+	./setup.py sdist --formats=gztar,zip
