@@ -1,5 +1,11 @@
 
 
+**test med fallet att anropet kommer före functionsdefinitionen. 
+
+
+**Seed är fast som default. Stämmer inte med hjälpen. 
+
+
 * Obfuscate strings, by using \x sequences. 
 
 
