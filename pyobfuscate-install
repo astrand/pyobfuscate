@@ -65,8 +65,9 @@ def main():
     cmd = os.path.join(origin, "pyobfuscate")
     cmd += " " + source + " >" + dest
     print >>sys.stderr, "Calling", cmd
-    os.system(cmd)
+    retcode = os.system(cmd)
     os.chmod(dest, mode)
+    sys.exit(retcode)
     
 
 if __name__ == "__main__":
