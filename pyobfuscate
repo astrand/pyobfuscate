@@ -450,17 +450,16 @@ class CSTWalker:
                         raise RuntimeError("Internal Error")
                 elif s.is_global():
                     topsymtab = symtabs[0]
-                    isglobal = 0
                     if id in topsymtab.get_identifiers():
                         topsym = topsymtab.lookup(id)
-                        isglobal = topsym.is_global() \
-                                   or topsym.is_local() \
-                                   or topsym.is_assigned() \
-
-                    if isglobal:
-                        obfuscate = id not in self.pubapi
+                        if topsym.is_imported():
+                            obfuscate = 0
+                        elif topsym.is_global() \
+                             or topsym.is_local() \
+                             or topsym.is_assigned():
+                            obfuscate = id not in self.pubapi
                     else:
-                        # Probably a symbol from import *
+                        # Not in top symbol table. Do not obfuscate.
                         obfuscate = 0
                 elif s.is_referenced():
                     # Strange. Not global, not local, nor some form of
@@ -468,21 +467,17 @@ class CSTWalker:
                     # 896061. Try to explicitly look in the top level
                     # namespace. 
                     topsymtab = symtabs[0]
-                    isglobal = 0
                     if id in topsymtab.get_identifiers():
                         topsym = topsymtab.lookup(id)
                         if topsym.is_imported():
                             # Perhaps a symbol "bar", from "from foo
                             # import bar" Do not obfuscate.
-                            pass
+                            obfuscate = 0
                         elif topsym.is_assigned():
-                            isglobal = 1
-
-                    if isglobal:
-                        obfuscate = id not in self.pubapi
-                    else:
-                        # Probably a symbol from import *
-                        obfuscate = 0
+                            obfuscate = id not in self.pubapi
+                        else:
+                            # Probably a symbol from import *
+                            obfuscate = 0
                 else:
                     print >>sys.stderr, "WARNING: Insufficient information about symbol", id
                     obfuscate = 0
