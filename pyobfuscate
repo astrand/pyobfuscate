@@ -87,7 +87,6 @@ class NameTranslator:
 class LambdaSymTable:
     def __init__(self, symtabs, argnames):
         # Well, lambdas have no name, so they are safe to obfuscate...
-        self.obfuscated = 1
         self.symtabs = symtabs
         self.mysymbs = {}
         for argname in argnames:
@@ -153,6 +152,29 @@ class CSTWalker:
         return 0
 
 
+    def namespace_obfuscate(self, tab, id):
+        if isinstance(tab, LambdaSymTable):
+            return 1
+
+        if self.res_name(id):
+            return 0
+
+        tabtype = tab.get_type()
+        if tabtype == "module":
+            # Toplevel. Check with pubapi.
+            return id not in self.pubapi
+        elif tabtype == "class":
+            # This is a method (or, perhaps, a class in a class)
+            # FIXME: We cannot obfuscate methods right now,
+            # because we cannot handle calls like obj.meth(),
+            # since we do not know the type of obj. 
+            #classname = tab.get_name()
+            #obfuscate = classname not in self.pubapi
+            return 0
+        else:
+            return 1
+
+
     def walk(self, elements, symtabs, functioncall=""):
         # We are not interested in terminal tokens
         if type(elements) != types.TupleType:
@@ -202,32 +224,10 @@ class CSTWalker:
         line = name[2]
 
         tab = symtabs[-1]
-        if self.res_name(id):
-            obfuscate = 0
-        else:
-            tabtype = tab.get_type()
-            if tabtype == "module":
-                # Toplevel. Check with pubapi.
-                obfuscate = id not in self.pubapi
-            elif tabtype == "class":
-                # This is a method
-                # FIXME: We cannot obfuscate methods right now,
-                # because we cannot handle calls like obj.meth(),
-                # since we do not know the type of obj. 
-                #classname = tab.get_name()
-                #obfuscate = classname not in self.pubapi
-                obfuscate = 0
-            else:
-                # OK to obfuscate
-                obfuscate = 1
-
-        # Set a flag on the SymbolTable object to indicate if this
-        # block name is obfuscated or not.
-        functab = tab.lookup(id).get_namespace()
-        functab.obfuscated = obfuscate
-        
+        obfuscate = self.namespace_obfuscate(tab, id)
         self.addToNames(line, id, obfuscate)
 
+        functab = tab.lookup(id).get_namespace()
         for node in elements:
             self.walk(node, symtabs + [functab])
 
@@ -239,7 +239,6 @@ class CSTWalker:
         # The purpose of this method is to find vararg and kwarg names
         # (which are not fpdefs).
         tab = symtabs[-1]
-        obfuscate = tab.obfuscated
 
         for tok in elements:
             if type(tok) != types.TupleType:
@@ -255,6 +254,7 @@ class CSTWalker:
             elif toktype == token.NAME:
                 id = tok[1]
                 line = tok[2]
+                obfuscate = self.namespace_obfuscate(tab, id)
                 self.addToNames(line, id, obfuscate)
             elif toktype == symbol.fpdef:
                 self.handle_fpdef(tok, symtabs)
@@ -272,11 +272,7 @@ class CSTWalker:
         assert name[0] == token.NAME
         id = name[1]
         line = name[2]
-
-        if self.res_name(id):
-            obfuscate = 0
-        else:
-            obfuscate = tab.obfuscated
+        obfuscate = self.namespace_obfuscate(tab, id)
 
         self.addToNames(line, id, obfuscate)
         for node in elements:
@@ -437,7 +433,7 @@ class CSTWalker:
                 if s.is_imported():
                     obfuscate = 0
                 elif s.is_parameter() or s.is_vararg() or s.is_keywordarg():
-                    obfuscate = tab.obfuscated
+                    obfuscate = self.namespace_obfuscate(tab, id)
                 elif s.is_local():
                     tabtype = tab.get_type()
                     if tabtype == "module":
@@ -521,11 +517,6 @@ class CSTWalker:
                 # Function/method. OK to obfuscate. 
                 obfuscate = 1
 
-        # Set a flag on the SymbolTable object to indicate if this
-        # block name is obfuscated or not.
-        classtab = tab.lookup(id).get_namespace()
-        classtab.obfuscated = obfuscate
-        
         self.addToNames(line, id, obfuscate)
 
         aftername = elements[3]
@@ -592,7 +583,7 @@ class CSTWalker:
                     obfuscate = 0
                 elif funcsymb.is_namespace():
                     functab = funcsymb.get_namespace()
-                    obfuscate = functab.obfuscated
+                    obfuscate = self.namespace_obfuscate(functab, keyword_id)
                 else:
                     # What is this?!?
                     print >>sys.stderr, "Internal error: function symbol %s" % funcsymb
