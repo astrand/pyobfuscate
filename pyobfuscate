@@ -640,7 +640,11 @@ class CSTWalker:
     def handle_power(self, elements, symtabs):
         # power: atom trailer* ['**' factor]
         # elements is like:
+        # (304, (305, (1, 'y', 3)))
+        # or
         # (304, (305, (1, 'sys', 8)), (308, (23, '.', 8), (1, 'path', 8)))
+        # or
+        # (304, (305, (2, '2', 3)), (36, '**', 3), (303, (304, (305, (2, '2', 3)))))
         #
         # The purpose of this method is to make sure other methods,
         # such as handle_argument, knows which function we are
@@ -651,12 +655,12 @@ class CSTWalker:
         atomobj = atom[1]
 
         if len(elements) > 2:
-            # We have a trailer, so this is possible a function call. 
-            first_trailer = elements[2]
-            assert first_trailer[0] == symbol.trailer
-            trailerobj = first_trailer[1]
-            if (atomobj[0] == token.NAME) and (trailerobj[0] == token.LPAR):
-                functioncall = atomobj[1]
+            trailer_or_doublestar = elements[2]
+            if trailer_or_doublestar[0] == symbol.trailer:
+                # We have a trailer, so this is possibly a function call.
+                trailerobj = trailer_or_doublestar[1]
+                if (atomobj[0] == token.NAME) and (trailerobj[0] == token.LPAR):
+                    functioncall = atomobj[1]
 
         for node in elements:
             self.walk(node, symtabs, functioncall)
