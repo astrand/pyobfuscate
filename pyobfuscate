@@ -458,6 +458,9 @@ class CSTWalker:
                              or topsym.is_local() \
                              or topsym.is_assigned():
                             obfuscate = id not in self.pubapi
+                        else:
+                            # Probably a symbol from import *
+                            obfuscate = 0
                     else:
                         # Not in top symbol table. Do not obfuscate.
                         obfuscate = 0
