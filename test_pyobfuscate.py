@@ -140,8 +140,11 @@ class ObfuscateTest(unittest.TestCase):
     def test_global_stmt(self):
         """Verify use of 'global' keyword"""
         assert 42 == self.obfuscate_and_run_file("testfiles/global.py"), "Incorrect value returned after obfuscation"
-        
 
+    def test_definition_after_use(self):
+        """Verify that a function defined after it's used works as expected"""
+        output = self.run_pyobfuscate("testfiles/defafteruse.py")
+        assert 42 == self.run_src(output), "Incorrect value returned after obfuscation"
 
                                  
 
