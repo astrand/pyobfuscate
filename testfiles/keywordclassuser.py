@@ -1,5 +1,6 @@
 
 import keywordclass
+import sys
 
 k = keywordclass.ClassWithKeywords(kwarg=20)
 
