@@ -59,6 +59,9 @@ def main():
     source = rest[0]
     dest = rest[1]
 
+    if os.path.isdir(dest):
+        dest = os.path.join(dest, os.path.basename(source))
+
     cmd = os.path.join(origin, "pyobfuscate")
     cmd += " " + source + " >" + dest
     print >>sys.stderr, "Calling", cmd
