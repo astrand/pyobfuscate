@@ -1,0 +1,71 @@
+#!/usr/bin/env python
+# pyobfuscate - Python source code obfuscator
+# 
+# Copyright (C) 2004 Cendio AB (www.cendio.com)
+# Author: Peter Astrand <peter@cendio.com>
+# 
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; version 2 of the License. 
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+
+
+import os, sys
+
+def get_origin_dir():
+    startdir = os.getcwd()
+    os.chdir(os.path.dirname(sys.argv[0]))
+    origin = os.getcwd()
+    os.chdir(startdir)
+    return origin
+
+
+def usage():
+    print >>sys.stderr, """
+Install and obfuscate a Python file in one step. 
+    
+Usage:
+pyobfuscate-install [-m <mode>] [pyobfuscate-args] <source> <dest>
+
+    """
+    sys.exit(1)
+
+
+def main():
+    if len(sys.argv) < 2:
+        usage()
+    
+    origin = get_origin_dir()
+    mode = 0775
+    rest = []
+    next_is_mode = False
+    for arg in sys.argv[1:]:
+        if next_is_mode:
+            mode = int(arg, 8)
+            next_is_mode = False
+        elif arg == "-m":
+            next_is_mode = True
+        else:
+            rest.append(arg)
+
+    source = rest[0]
+    dest = rest[1]
+
+    cmd = os.path.join(origin, "pyobfuscate")
+    cmd += " " + source + " >" + dest
+    print >>sys.stderr, "Calling", cmd
+    os.system(cmd)
+    os.chmod(dest, mode)
+    
+
+if __name__ == "__main__":
+    main()
+
