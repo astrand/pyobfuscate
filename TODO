@@ -1,9 +1,9 @@
 
+* Write testcases!
 
-**test med fallet att anropet kommer före functionsdefinitionen. 
 
-
-**Seed är fast som default. Stämmer inte med hjälpen. 
+* The documentation for the --seed argument says default is to use
+  system time, but in reality, a fixed number is used. 
 
 
 * Obfuscate strings, by using \x sequences. 
