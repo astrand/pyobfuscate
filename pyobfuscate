@@ -85,10 +85,10 @@ class NameTranslator:
     
 
 class LambdaSymTable:
-    def __init__(self, symtab, argnames):
+    def __init__(self, symtabs, argnames):
         # Well, lambdas have no name, so they are safe to obfuscate...
         self.obfuscated = 1
-        self.symtab = symtab
+        self.symtabs = symtabs
         self.mysymbs = {}
         for argname in argnames:
             self.mysymbs[argname] = symtable.Symbol(argname, symtable.DEF_PARAM)
@@ -99,11 +99,17 @@ class LambdaSymTable:
         if lsymb:
             return lsymb
         else:
-            return self.symtab.lookup(name)
+            # If the symbol is not found in the current sumboltable,
+            # then look in the toplevel symtable. Perhaps we should
+            # even look in all symtabs. 
+            try:
+                return self.symtabs[-1].lookup(name)
+            except KeyError:
+                return self.symtabs[0].lookup(name)
 
 
     def get_type(self):
-        return self.symtab.get_type()
+        return self.symtabs[-1].get_type()
 
     
 
@@ -627,9 +633,8 @@ class CSTWalker:
             for line, name in arguments:
                 self.addToNames(line, name, 1)
 
-            tab = symtabs[-1]
             argnames = [e[1] for e in arguments]
-            lambdatab = LambdaSymTable(tab, argnames)
+            lambdatab = LambdaSymTable(symtabs, argnames)
 
             # Part 2: Parse the 'test' part, using the LambdaSymTable.
             test = elements[4]
