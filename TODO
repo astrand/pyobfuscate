@@ -1,0 +1,20 @@
+
+
+* Obfuscate strings, by using \x sequences. 
+
+
+* Obfuscate attributes and methods. The fundamental problem is that
+  when referencing attributes/methods (with obj.attr or obj.meth), we
+  do not know the type of obj. The Bicycle Repair Man project has some
+  type detection code, which might be useful. 
+
+
+* Replace all "import foo" with "import foo as somethingobfuscated". 
+
+
+* Do not put noop-lines before from __future__ imports. 
+
+
+* Make noop-lines even more unreadable by introducing variables in the
+  "if" expression, and possible let multiple adjacent noop-lines form
+  a single if-statement. 
