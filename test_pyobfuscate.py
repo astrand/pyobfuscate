@@ -129,6 +129,14 @@ class ObfuscateTest(unittest.TestCase):
         (stdout, stderr) = p.communicate()
         assert -1 != stderr.find("__all__ is not a list of constants"), "pyobufscate didn't bail out with an error on file with dynamic __all__"
 
+    def test_import_with_keywords(self):
+        """Verify that an imported class, defined in __all__, does not get obfuscated keyword arguments"""
+        self.obfuscate_and_write("testfiles/keywordclass.py",
+                                 "generated/keywordclass.py")
+        self.obfuscate_and_write("testfiles/keywordclassuser.py",
+                                 "generated/keywordclassuser.py")
+        assert 42 == subprocess.call([sys.executable, "generated/keywordclassuser.py"]), "Incorrect value returned after obfuscation"
+
     def test_global_stmt(self):
         """Verify use of 'global' keyword"""
         assert 42 == self.obfuscate_and_run_file("testfiles/global.py"), "Incorrect value returned after obfuscation"
