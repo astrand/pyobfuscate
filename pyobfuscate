@@ -448,7 +448,7 @@ class CSTWalker:
                         obfuscate = 0
                     else:
                         raise RuntimeError("Internal Error")
-                elif s.is_global():
+                elif s.is_global() or s.is_referenced():
                     topsymtab = symtabs[0]
                     if id in topsymtab.get_identifiers():
                         topsym = topsymtab.lookup(id)
@@ -463,27 +463,6 @@ class CSTWalker:
                             obfuscate = 0
                     else:
                         # Not in top symbol table. Do not obfuscate.
-                        obfuscate = 0
-                elif s.is_referenced():
-                    # Strange. Not global, not local, nor some form of
-                    # parameter. I would say that this is SF bug
-                    # 896061. Try to explicitly look in the top level
-                    # namespace. 
-                    topsymtab = symtabs[0]
-                    if id in topsymtab.get_identifiers():
-                        topsym = topsymtab.lookup(id)
-                        if topsym.is_imported():
-                            # Perhaps a symbol "bar", from "from foo
-                            # import bar" Do not obfuscate.
-                            obfuscate = 0
-                        elif topsym.is_assigned():
-                            obfuscate = id not in self.pubapi
-                        else:
-                            # Probably a symbol from import *
-                            obfuscate = 0
-                    else:
-                        # Not in topsymtab.get_identifiers. Probably
-                        # from "import *"
                         obfuscate = 0
                 else:
                     print >>sys.stderr, "WARNING: Insufficient information about symbol", id
