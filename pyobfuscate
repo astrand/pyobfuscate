@@ -147,15 +147,17 @@ class CSTWalker:
         return 0
 
 
-    def walk(self, elements, symtabs):
+    def walk(self, elements, symtabs, functioncall=""):
         # We are not interested in terminal tokens
         if type(elements) != types.TupleType:
             return
         if token.ISTERMINAL(elements[0]):
             return
- 
+
         production = elements[0]
-        if production == symbol.funcdef:
+        if production == symbol.power:
+            self.handle_power(elements, symtabs)
+        elif production == symbol.funcdef:
             self.handle_funcdef(elements, symtabs)
         elif production == symbol.varargslist:
             self.handle_varargslist(elements, symtabs)
@@ -172,16 +174,16 @@ class CSTWalker:
         elif production == symbol.atom:
             self.handle_atom(elements, symtabs)
         elif production == symbol.trailer:
-            self.handle_trailer(elements, symtabs)
+            self.handle_trailer(elements, symtabs, functioncall)
         elif production == symbol.classdef:
             self.handle_classdef(elements, symtabs)
         elif production == symbol.argument:
-            self.handle_argument(elements, symtabs)
+            self.handle_argument(elements, symtabs, functioncall)
         elif production == symbol.lambdef:
             self.handle_lambdef(elements, symtabs)
         else:
             for node in elements:
-                self.walk(node, symtabs)
+                self.walk(node, symtabs, functioncall)
 
 
     def handle_funcdef(self, elements, symtabs):
@@ -486,12 +488,12 @@ class CSTWalker:
                     obfuscate = 0
 
             self.addToNames(line, id, obfuscate)
-            
+
         for node in elements:
             self.walk(node, symtabs)
 
 
-    def handle_trailer(self, elements, symtabs):
+    def handle_trailer(self, elements, symtabs, functioncall=""):
         # trailer: ... | '.' NAME
         # elements is something like:
         # (308, (23, '.', 33), (1, 'poll', 33))
@@ -505,7 +507,7 @@ class CSTWalker:
             # hard!
             self.addToNames(line, id, 0)
         for node in elements:
-            self.walk(node, symtabs)
+            self.walk(node, symtabs, functioncall)
 
 
     def handle_classdef(self, elements, symtabs):
@@ -531,6 +533,11 @@ class CSTWalker:
             else:
                 # Function/method. OK to obfuscate. 
                 obfuscate = 1
+
+        # Set a flag on the SymbolTable object to indicate if this
+        # block name is obfuscated or not.
+        classtab = tab.lookup(id).get_namespace()
+        classtab.obfuscated = obfuscate
         
         self.addToNames(line, id, obfuscate)
 
@@ -552,7 +559,7 @@ class CSTWalker:
             self.walk(node, symtabs + [classtab])
 
 
-    def handle_argument(self, elements, symtabs):
+    def handle_argument(self, elements, symtabs, functioncall=""):
         # argument: [test '='] test       # Really [keyword '='] test
         # elements is like:
         # (318, (292, (293, (294, (295, (297, (298, (299, (300, (301,
@@ -568,12 +575,44 @@ class CSTWalker:
             keyword_id = keyword[1]
             keyword_line = keyword[2]
 
-            # It's not possible to look up keyword in our symbol
-            # table. Obfuscate keyword if the function we are trying
-            # to call is obfuscated.
-            # FIXME: Implement.
-            self.addToNames(keyword_line, keyword_id, 0)
 
+            # Ok, let's get to work. We should obfuscate the keyword
+            # argument if this is a function call, and the function
+            # name is obfuscated.
+            if not functioncall:
+                obfuscate = 0
+            else:
+                # Our first task is to get the SymbolTable object for
+                # our function. Find the namespace object for this
+                # function.
+                reversed_symtabs = symtabs[:]
+                reversed_symtabs.reverse()
+                funcsymb = None
+                for tab in reversed_symtabs:
+                    try:
+                        sym = tab.lookup(functioncall)
+                    except KeyError:
+                        continue
+                    if sym.is_assigned():
+                        funcsymb = sym
+                        break
+
+                # Examine the function symbol object
+                if not funcsymb:
+                    # Did not find the function. Probably from import *
+                    obfuscate = 0
+                elif funcsymb.is_imported():
+                    obfuscate = 0
+                elif funcsymb.is_namespace():
+                    functab = funcsymb.get_namespace()
+                    obfuscate = functab.obfuscated
+                else:
+                    # What is this?!?
+                    print >>sys.stderr, "Internal error: function symbol %s" % funcsymb
+                    print >>sys.stderr, "is neither imported nor a namespace!"
+                    sys.exit(1)
+
+            self.addToNames(keyword_line, keyword_id, obfuscate)
             eq = elements[2]
             assert eq[0] == token.EQUAL
 
@@ -615,6 +654,31 @@ class CSTWalker:
             test = elements[4]
             for node in test:
                 self.walk(node, symtabs + [lambdatab])
+
+
+    def handle_power(self, elements, symtabs):
+        # power: atom trailer* ['**' factor]
+        # elements is like:
+        # (304, (305, (1, 'sys', 8)), (308, (23, '.', 8), (1, 'path', 8)))
+        #
+        # The purpose of this method is to make sure other methods,
+        # such as handle_argument, knows which function we are
+        # dealing, in the case of a functioncall. 
+        functioncall = ""
+        atom = elements[1]
+        assert atom[0] == symbol.atom
+        atomobj = atom[1]
+
+        if len(elements) > 2:
+            # We have a trailer, so this is possible a function call. 
+            first_trailer = elements[2]
+            assert first_trailer[0] == symbol.trailer
+            trailerobj = first_trailer[1]
+            if (atomobj[0] == token.NAME) and (trailerobj[0] == token.LPAR):
+                functioncall = atomobj[1]
+
+        for node in elements:
+            self.walk(node, symtabs, functioncall)
 
 
     def get_varargs_names(elements):
