@@ -1021,7 +1021,7 @@ class Configuration:
     def __init__(self):
         try:
             opts, args = getopt.getopt(sys.argv[1:], "hi:s:rkfav",
-                                       ["help", "indent=", "seed=", "removeblanks"
+                                       ["help", "indent=", "seed=", "removeblanks",
                                         "keepblanks", "firstcomment", "allpublic",
                                         "verbose"])
             if len(args) != 1:
