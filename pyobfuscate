@@ -233,23 +233,26 @@ class CSTWalker:
         tab = symtabs[-1]
         obfuscate = tab.obfuscated
 
-        next_is_name = False
         for tok in elements:
             if type(tok) != types.TupleType:
                 continue
 
             toktype = tok[0]
-            if next_is_name:
-                assert tok[0] == token.NAME
+            if toktype == symbol.test:
+                # This is a "= test" expression
+                for node in tok:
+                    # The [:-1] is because we actually are not in the
+                    # functions scope yet. 
+                    self.walk(node, symtabs[:-1])
+            elif toktype == token.NAME:
                 id = tok[1]
                 line = tok[2]
                 self.addToNames(line, id, obfuscate)
-                next_is_name = False
-            elif toktype in [token.STAR, token.DOUBLESTAR]:
-                next_is_name = True
             elif toktype == symbol.fpdef:
                 self.handle_fpdef(tok, symtabs)
-
+            else:
+                assert(toktype in [token.STAR, token.DOUBLESTAR,
+                                   token.COMMA, token.EQUAL])
 
     def handle_fpdef(self, elements, symtabs):
         # fpdef: NAME | '(' fplist ')'
