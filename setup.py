@@ -7,12 +7,12 @@ Python source code obfuscator
 from distutils.core import setup
 
 setup (name = "pyobfuscate",
-       version = "0.2",
+       version = "0.3",
        license = "GPL",
        description = "pyobfuscate",
        long_description = DESCRIPTION,
        author = "Peter Astrand",
-       author_email = "peter@cendio.com",
+       author_email = "astrand@cendio.com",
        url = "http://www.lysator.liu.se/~astrand/projects/pyobfuscate/",
        data_files=[('/usr/bin', ['pyobfuscate'])]
        )
