@@ -146,6 +146,11 @@ class ObfuscateTest(unittest.TestCase):
         output = self.run_pyobfuscate("testfiles/defafteruse.py")
         assert 42 == self.run_src(output), "Incorrect value returned after obfuscation"
 
+    def test_bug1583(self):
+        """Verify that bug 1583 is not present (lambda obfuscation problems)"""
+        output = self.run_pyobfuscate("testfiles/bug1583.py")
+        assert 42 == self.run_src(output), "Incorrect value returned after obfuscation"
+
                                  
 
     
