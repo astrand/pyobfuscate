@@ -44,7 +44,7 @@ def main():
         usage()
     
     origin = get_origin_dir()
-    mode = 0775
+    mode = 0755
     rest = []
     next_is_mode = False
     for arg in sys.argv[1:]:
