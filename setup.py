@@ -12,7 +12,7 @@ setup (name = "pyobfuscate",
        description = "pyobfuscate",
        long_description = DESCRIPTION,
        author = "Peter Astrand",
-       author_email = "astrand@cendio.com",
+       author_email = "astrand@cendio.se",
        url = "http://www.lysator.liu.se/~astrand/projects/pyobfuscate/",
        data_files=[('/usr/bin', ['pyobfuscate'])]
        )
