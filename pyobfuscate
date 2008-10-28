@@ -1058,7 +1058,7 @@ def main():
     conf = Configuration()
     random.seed(conf.seed)
 
-    source = open(conf.file).read()
+    source = open(conf.file, 'rU').read()
 
     if sys.version_info[:2] == (2, 3):
         # Enable Python 2.3 workaround for bug 898271.
