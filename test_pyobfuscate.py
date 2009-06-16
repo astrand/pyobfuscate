@@ -151,6 +151,11 @@ class ObfuscateTest(unittest.TestCase):
         output = self.run_pyobfuscate("testfiles/bug1583.py")
         assert 42 == self.run_src(output), "Incorrect value returned after obfuscation"
 
+    def test_bug1673(self):
+        """Verify that bug 1673 is not present (global variable handling)"""
+        output = self.run_pyobfuscate("testfiles/bug1673.py")
+        assert 49 == self.run_src(output), "Incorrect value returned after obfuscation"
+
                                  
 
     
