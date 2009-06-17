@@ -436,22 +436,6 @@ class CSTWalker:
                     obfuscate = 0
                 elif s.is_parameter() or s.is_vararg() or s.is_keywordarg():
                     obfuscate = self.namespace_obfuscate(tab, id)
-                elif s.is_local():
-                    tabtype = tab.get_type()
-                    if tabtype == "module":
-                        # Toplevel. Check with pubapi.
-                        obfuscate = id not in self.pubapi
-                    elif tabtype == "function":
-                        # Function/method. Always OK.
-                        obfuscate = 1
-                    elif tabtype == "class":
-                        # This is a class variable. 
-                        #classname = tab.get_name()
-                        #obfuscate = classname not in self.pubapi
-                        # FIXME: See comment in handle_funcdef
-                        obfuscate = 0
-                    else:
-                        raise RuntimeError("Internal Error")
                 elif s.is_global() or s.is_referenced():
                     topsymtab = symtabs[0]
                     if id in topsymtab.get_identifiers():
@@ -468,6 +452,22 @@ class CSTWalker:
                     else:
                         # Not in top symbol table. Do not obfuscate.
                         obfuscate = 0
+                elif s.is_local():
+                    tabtype = tab.get_type()
+                    if tabtype == "module":
+                        # Toplevel. Check with pubapi.
+                        obfuscate = id not in self.pubapi
+                    elif tabtype == "function":
+                        # Function/method. Always OK.
+                        obfuscate = 1
+                    elif tabtype == "class":
+                        # This is a class variable. 
+                        #classname = tab.get_name()
+                        #obfuscate = classname not in self.pubapi
+                        # FIXME: See comment in handle_funcdef
+                        obfuscate = 0
+                    else:
+                        raise RuntimeError("Internal Error")
                 else:
                     print >>sys.stderr, "WARNING: Insufficient information about symbol", id
                     obfuscate = 0
