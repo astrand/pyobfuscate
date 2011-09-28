@@ -111,7 +111,10 @@ class LambdaSymTable:
     def get_type(self):
         return self.symtabs[-1].get_type()
 
-    
+
+    def is_lambda_arg(self, id):
+        return self.mysymbs.has_key(id)
+
 
 class CSTWalker:
     def __init__(self, source_no_encoding, pubapi):
@@ -155,7 +158,8 @@ class CSTWalker:
 
     def namespace_obfuscate(self, tab, id):
         if isinstance(tab, LambdaSymTable):
-            return 1
+            if tab.is_lambda_arg(id):
+                return 1
 
         if self.res_name(id):
             return 0
@@ -215,6 +219,22 @@ class CSTWalker:
                 self.walk(node, symtabs, functioncall)
 
 
+    def mangle_name(self, symtabs, name):
+        if self.res_name(name):
+            return name
+
+        if not name.startswith("__"):
+            return name
+
+        for i in xrange(len(symtabs)):
+            tab = symtabs[-1 - i]
+            tabtype = tab.get_type()
+            if tabtype == "class":
+                classname = tab.get_name().lstrip("_")
+                return "_" + classname + name
+
+        return name
+
     def handle_funcdef(self, elements, symtabs):
         # funcdef: 'def' NAME parameters ':' suite
         # elements is something like:
@@ -228,9 +248,21 @@ class CSTWalker:
         obfuscate = self.namespace_obfuscate(tab, id)
         self.addToNames(line, id, obfuscate)
 
-        functab = tab.lookup(id).get_namespace()
+        orig_id = id
+        id = self.mangle_name(symtabs, id)
+
+        functabs = tab.lookup(id).get_namespaces()
+
+        # Mangled names mess up the association with the symbol table, so
+        # we need to find it manually
+        if len(functabs) == 0:
+            functabs = []
+            for child in tab.get_children():
+                if child.get_name() == orig_id:
+                    functabs.append(child)
+
         for node in elements:
-            self.walk(node, symtabs + [functab])
+            self.walk(node, symtabs + functabs)
 
 
     def handle_varargslist(self, elements, symtabs):
@@ -429,6 +461,8 @@ class CSTWalker:
             if self.res_name(id):
                 obfuscate = 0
             else:
+                id = self.mangle_name(symtabs, id)
+
                 s = tab.lookup(id)
 
                 if s.is_imported():
@@ -609,12 +643,13 @@ class CSTWalker:
         # or
         # (307, (1, 'lambda', 40), (11, ':', 40), (292 ...
         if elements[2][0] == token.COLON:
-            # There are no lambda arguments. Simple! The parsing of
-            # the test part can be done using the current symbol
-            # table.
+            # There are no lambda arguments. Simple!
+            # We still need to create a LambdaSymTable though since we
+            # rely on some magic lookup that it does.
             test = elements[3]
+            lambdatab = LambdaSymTable(symtabs, [])
             for node in test:
-                self.walk(node, symtabs)
+                self.walk(node, symtabs + [lambdatab])
         else:
             # The more common case: You have a varargslist.
             varargslist = elements[2]
