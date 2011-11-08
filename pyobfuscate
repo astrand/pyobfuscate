@@ -467,7 +467,7 @@ class CSTWalker:
 
                 if s.is_imported():
                     obfuscate = 0
-                elif s.is_parameter() or s.is_vararg() or s.is_keywordarg():
+                elif s.is_parameter():
                     obfuscate = self.namespace_obfuscate(tab, id)
                 elif s.is_global() or s.is_referenced():
                     topsymtab = symtabs[0]
@@ -583,7 +583,10 @@ class CSTWalker:
         else:
             # keyword=test
             # FIXME: A bit ugly...
-            keyword = elements[1][1][1][1][1][1][1][1][1][1][1][1][1][1]
+            if sys.hexversion >= 0x2040000:
+                keyword = elements[1][1][1][1][1][1][1][1][1][1][1][1][1][1][1]
+            else:
+                keyword = elements[1][1][1][1][1][1][1][1][1][1][1][1][1][1]
             assert keyword[0] == token.NAME
             keyword_id = keyword[1]
             keyword_line = keyword[2]
@@ -938,7 +941,9 @@ class TokenPrinter:
                 
                 if self.first_on_line:
                     if self.commentstate in [TokenPrinter.BEFORECOMMENT, TokenPrinter.INSIDECOMMENT]:
-                        # Output comment unmodified
+                        # Output comment. Only old Python includes newline. 
+                        if sys.hexversion >= 0x2040000: 
+                            t_string += "\n"
                         self.line_append(t_string)
                     elif conf.blanks != conf.KEEP_BLANKS:
                         self.pending.append(self.gen_noop_line() + "\n")
@@ -949,6 +954,9 @@ class TokenPrinter:
                     self.this_lineno += 1
                 # tokenizer does not generate a NEWLINE after comment
                 self.first_on_line = 1
+                if sys.hexversion >= 0x2040000:
+                    # tokinizer generates NL after each COMMENT
+                    self.skip_token = 1
             elif t_type == tokenize.STRING:
                 if self.first_on_line:
                     # Skip over docstrings
