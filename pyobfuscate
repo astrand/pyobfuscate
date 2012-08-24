@@ -22,6 +22,7 @@ import sys
 import types
 import symbol
 import token
+import keyword
 import tokenize
 import compiler
 import parser
@@ -156,31 +157,7 @@ class CSTWalker:
         return 0
 
 
-    def namespace_obfuscate(self, tab, id):
-        if isinstance(tab, LambdaSymTable):
-            if tab.is_lambda_arg(id):
-                return 1
-
-        if self.res_name(id):
-            return 0
-
-        tabtype = tab.get_type()
-        if tabtype == "module":
-            # Toplevel. Check with pubapi.
-            return id not in self.pubapi
-        elif tabtype == "class" or tabtype == "function":
-            # This is a method (or, perhaps, a class in a class)
-            # FIXME: We cannot obfuscate methods right now,
-            # because we cannot handle calls like obj.meth(),
-            # since we do not know the type of obj. 
-            #classname = tab.get_name()
-            #obfuscate = classname not in self.pubapi
-            return 0
-        else:
-            return 1
-
-
-    def walk(self, elements, symtabs, functioncall=""):
+    def walk(self, elements, symtabs):
         # We are not interested in terminal tokens
         if type(elements) != types.TupleType:
             return
@@ -188,9 +165,7 @@ class CSTWalker:
             return
 
         production = elements[0]
-        if production == symbol.power:
-            self.handle_power(elements, symtabs)
-        elif production == symbol.funcdef:
+        if production == symbol.funcdef:
             self.handle_funcdef(elements, symtabs)
         elif production == symbol.varargslist:
             self.handle_varargslist(elements, symtabs)
@@ -207,16 +182,16 @@ class CSTWalker:
         elif production == symbol.atom:
             self.handle_atom(elements, symtabs)
         elif production == symbol.trailer:
-            self.handle_trailer(elements, symtabs, functioncall)
+            self.handle_trailer(elements, symtabs)
         elif production == symbol.classdef:
             self.handle_classdef(elements, symtabs)
         elif production == symbol.argument:
-            self.handle_argument(elements, symtabs, functioncall)
+            self.handle_argument(elements, symtabs)
         elif production == symbol.lambdef:
             self.handle_lambdef(elements, symtabs)
         else:
             for node in elements:
-                self.walk(node, symtabs, functioncall)
+                self.walk(node, symtabs)
 
 
     def mangle_name(self, symtabs, name):
@@ -235,6 +210,132 @@ class CSTWalker:
 
         return name
 
+    def should_obfuscate(self, id, symtabs):
+        # This is the primary location of the magic in pyobfuscate,
+        # where we try to figure out if a given symbol should be
+        # obfuscated or left alone.
+
+        tab = symtabs[-1]
+
+        # Don't touch reserved names
+        if self.res_name(id):
+            return False
+
+        # Need to get the internal symbol name before we can look it
+        # up (needed for private class/object members)
+        orig_id = id
+        id = self.mangle_name(symtabs, id)
+
+        s = tab.lookup(id)
+
+        # XXX: Debug code
+        #      Add the symbols you want to examine to this list
+        debug_symbols = []
+        if id in debug_symbols:
+            print >>sys.stderr, "%s:" % id
+            print >>sys.stderr, "  Imported:", s.is_imported()
+            print >>sys.stderr, "  Parameter:", s.is_parameter()
+            print >>sys.stderr, "  Global:", s.is_global()
+            print >>sys.stderr, "  Local:", s.is_local()
+
+        # Explicit imports are a clear no
+        if s.is_imported():
+            return False
+
+        # Don't obfuscate arguments as the caller might be external
+        # and referencing them by name
+        if s.is_parameter():
+            # But we assume that lambda arguments are never referenced
+            # by name. FIXME?
+            if isinstance(tab, LambdaSymTable):
+                if tab.is_lambda_arg(id):
+                    return True
+
+            return False
+
+        # Lambda scopes have some kind of pseudo-inheritance from
+        # the surounding scope. As lambdas can only declare arguments
+        # (which we just handled), we should start digging upwards for
+        # all other symbols.
+        if isinstance(tab, LambdaSymTable):
+            while True:
+                symtabs = symtabs[:-1]
+                if symtabs == []:
+                    raise RuntimeError("Lambda symbol '%s' is not present on any scope" % id)
+
+                if id in symtabs[-1].get_identifiers():
+                    return self.should_obfuscate(orig_id, symtabs)
+
+        # Global objects require special consideration. Need to figure
+        # out where the symbol originated...
+        if s.is_global():
+            topsymtab = symtabs[0]
+
+            # A global that's not in the global symbol table is a symbol
+            # that Python has no idea where it comes from (it is only
+            # "read" in every context in the module). That means either
+            # buggy code, or that it got dragged in via "import *". Assume
+            # the latter and don't obfuscate it.
+            if id not in topsymtab.get_identifiers():
+                return False
+
+            topsym = topsymtab.lookup(id)
+
+            # XXX: See above:
+            if id in debug_symbols:
+                print >>sys.stderr, "  Imported (G):", topsym.is_imported()
+                print >>sys.stderr, "  Parameter (G):", topsym.is_parameter()
+                print >>sys.stderr, "  Global (G):", topsym.is_global()
+                print >>sys.stderr, "  Local (G):", topsym.is_local()
+
+            # Explicit imports are a clear no
+            if topsym.is_imported():
+                return False
+
+            # "Local" really means "written to", or "declared". So a
+            # global that is not "local" in the global symbol table is
+            # something that was created in another scope. This can happen
+            # in two cases:
+            #
+            #  a) Imported via *
+            #
+            #  b) Created via "global foo" inside a function
+            #
+            # We want to obfuscate b), but not a). But we cannot tell which
+            # is which, so just leave both alone.
+            if not topsym.is_local():
+                return False
+
+            # This is something we declared, so obfuscate unless it is
+            # part of the module API.
+            return id not in self.pubapi
+
+        # If it's not global, nor local, then it must come from a
+        # containing scope (e.g. function inside another function).
+        if not s.is_local():
+            # Any more scopes to try?
+            if len(symtabs) <= 2:
+                raise RuntimeError("Symbol '%s' is not present on any scope" % id)
+            return self.should_obfuscate(orig_id, symtabs[:-1])
+
+        # Local symbols are handled differently depending on what
+        # our current scope is.
+        tabtype = tab.get_type()
+        if tabtype == "module":
+            # Toplevel. Check with pubapi.
+            return id not in self.pubapi
+        elif tabtype == "function":
+            # Function/method. Always OK.
+            return True
+        elif tabtype == "class":
+            # This is a class method/variable (or, perhaps, a class in a class)
+            # FIXME: We cannot obfuscate methods right now,
+            # because we cannot handle calls like obj.meth(),
+            # since we do not know the type of obj.
+            return False
+        else:
+            raise RuntimeError("Unknown scope '%s' for symbol '%s'" % (tabtype, id))
+
     def handle_funcdef(self, elements, symtabs):
         # funcdef: 'def' NAME parameters ':' suite
         # elements is something like:
@@ -243,10 +344,11 @@ class CSTWalker:
         assert name[0] == token.NAME
         id = name[1]
         line = name[2]
+        obfuscate = self.should_obfuscate(id, symtabs)
+
+        self.addToNames(line, id, obfuscate)
 
         tab = symtabs[-1]
-        obfuscate = self.namespace_obfuscate(tab, id)
-        self.addToNames(line, id, obfuscate)
 
         orig_id = id
         id = self.mangle_name(symtabs, id)
@@ -285,9 +387,15 @@ class CSTWalker:
                     # functions scope yet. 
                     self.walk(node, symtabs[:-1])
             elif toktype == token.NAME:
+                # This is either an "*args" or an "**kwargs". We could
+                # in theory obfuscate these as they cannot be referenced
+                # directly by the caller. However, we currently have no
+                # idea of telling that these are special when we hit the
+                # references to them. So for now we treat them as we
+                # would any other argument.
                 id = tok[1]
                 line = tok[2]
-                obfuscate = self.namespace_obfuscate(tab, id)
+                obfuscate = self.should_obfuscate(id, symtabs)
                 self.addToNames(line, id, obfuscate)
             elif toktype == symbol.fpdef:
                 self.handle_fpdef(tok, symtabs)
@@ -299,13 +407,11 @@ class CSTWalker:
         # fpdef: NAME | '(' fplist ')'
         # elements is something like:
         # (262, (1, 'self', 13))
-        tab = symtabs[-1]
-        
         name = elements[1]
         assert name[0] == token.NAME
         id = name[1]
         line = name[2]
-        obfuscate = self.namespace_obfuscate(tab, id)
+        obfuscate = self.should_obfuscate(id, symtabs)
 
         self.addToNames(line, id, obfuscate)
         for node in elements:
@@ -429,7 +535,7 @@ class CSTWalker:
         assert name1[0] == token.NAME
         id1 = name1[1]
         line1 = name1[2]
-        obfuscate = id1 not in self.pubapi
+        obfuscate = self.should_obfuscate(id1, symtabs)
         self.addToNames(line1, id1, obfuscate)
 
         # Sequence length should be odd
@@ -455,64 +561,7 @@ class CSTWalker:
         if name[0] == token.NAME:
             id = name[1]
             line = name[2]
-
-            tab = symtabs[-1]
-
-            if self.res_name(id):
-                obfuscate = 0
-            else:
-                id = self.mangle_name(symtabs, id)
-
-                s = tab.lookup(id)
-
-                if s.is_imported():
-                    obfuscate = 0
-                elif s.is_parameter():
-                    obfuscate = self.namespace_obfuscate(tab, id)
-                elif s.is_global() or s.is_referenced():
-                    topsymtab = symtabs[0]
-                    if id in topsymtab.get_identifiers():
-                        topsym = topsymtab.lookup(id)
-                        if topsym.is_imported():
-                            obfuscate = 0
-                        elif not topsym.is_local():
-                            # Something that is not local on the top scope
-                            # is either external or a bad reference
-                            #
-                            # Note: Local objects can also be global if
-                            #       they are referenced using "global"
-                            #       later on. Hence we cannot use
-                            #       is_global() here.
-                            obfuscate = 0
-                        elif topsym.is_global() \
-                             or topsym.is_local() \
-                             or topsym.is_assigned():
-                            obfuscate = id not in self.pubapi
-                        else:
-                            # Probably a symbol from import *
-                            obfuscate = 0
-                    else:
-                        # Not in top symbol table. Do not obfuscate.
-                        obfuscate = 0
-                elif s.is_local():
-                    tabtype = tab.get_type()
-                    if tabtype == "module":
-                        # Toplevel. Check with pubapi.
-                        obfuscate = id not in self.pubapi
-                    elif tabtype == "function":
-                        # Function/method. Always OK.
-                        obfuscate = 1
-                    elif tabtype == "class":
-                        # This is a class variable. 
-                        #classname = tab.get_name()
-                        #obfuscate = classname not in self.pubapi
-                        # FIXME: See comment in handle_funcdef
-                        obfuscate = 0
-                    else:
-                        raise RuntimeError("Internal Error")
-                else:
-                    print >>sys.stderr, "WARNING: Insufficient information about symbol", id
-                    obfuscate = 0
+            obfuscate = self.should_obfuscate(id, symtabs)
 
             self.addToNames(line, id, obfuscate)
 
@@ -520,7 +569,7 @@ class CSTWalker:
             self.walk(node, symtabs)
 
 
-    def handle_trailer(self, elements, symtabs, functioncall=""):
+    def handle_trailer(self, elements, symtabs):
         # trailer: ... | '.' NAME
         # elements is something like:
         # (308, (23, '.', 33), (1, 'poll', 33))
@@ -530,11 +579,11 @@ class CSTWalker:
             assert name[0] == token.NAME
             id = name[1]
             line = name[2]
-            # FIXME: Sometimes, in the future, perhaps obfuscate. This is
-            # hard!
+            # Cannot obfuscate these as we have no idea what the base
+            # object is.
             self.addToNames(line, id, 0)
         for node in elements:
-            self.walk(node, symtabs, functioncall)
+            self.walk(node, symtabs)
 
 
     def handle_classdef(self, elements, symtabs):
@@ -545,21 +594,7 @@ class CSTWalker:
         assert name[0] == token.NAME
         id = name[1]
         line = name[2]
-
-        tab = symtabs[-1]
-        if self.res_name(id):
-            obfuscate = 0
-        else:
-            tabtype = tab.get_type()
-            if tabtype == "module":
-                # Toplevel. Check with pubapi.
-                obfuscate = id not in self.pubapi
-            elif tabtype == "class":
-                # Gosh, a class in a class. Check with pubapi. 
-                obfuscate = id not in self.pubapi
-            else:
-                # Function/method. OK to obfuscate. 
-                obfuscate = 1
+        obfuscate = self.should_obfuscate(id, symtabs)
 
         self.addToNames(line, id, obfuscate)
 
@@ -576,21 +611,21 @@ class CSTWalker:
                 self.walk(node, symtabs)
             elements = elements[5:]
             
+        tab = symtabs[-1]
         classtab = tab.lookup(id).get_namespace()
         
         for node in elements:
             self.walk(node, symtabs + [classtab])
 
 
-    def handle_argument(self, elements, symtabs, functioncall=""):
+    def handle_argument(self, elements, symtabs):
         # argument: [test '='] test       # Really [keyword '='] test
         # elements is like:
         # (318, (292, (293, (294, (295, (297, (298, (299, (300, (301,
         # (302, (303, (304, (305, (3, '"SC_OPEN_MAX"', 15
-        if len(elements) < 3:
-            # handle_atom can handle this...
-            pass
-        else:
+
+        # Keyword argument?
+        if len(elements) >= 3:
             # keyword=test
             # FIXME: A bit ugly...
             if sys.hexversion >= 0x2040000:
@@ -601,48 +636,11 @@ class CSTWalker:
             keyword_id = keyword[1]
             keyword_line = keyword[2]
 
+            # Argument names have to be in the clear as we cannot track all
+            # callers. See should_obfuscate().
+            self.addToNames(keyword_line, keyword_id, False)
 
-            # Ok, let's get to work. We should obfuscate the keyword
-            # argument if this is a function call, and the function
-            # name is obfuscated.
-            if not functioncall:
-                obfuscate = 0
-            else:
-                # Our first task is to get the SymbolTable object for
-                # our function. Find the namespace object for this
-                # function.
-                reversed_symtabs = symtabs[:]
-                reversed_symtabs.reverse()
-                funcsymb = None
-                for tab in reversed_symtabs:
-                    try:
-                        sym = tab.lookup(functioncall)
-                    except KeyError:
-                        continue
-                    if sym.is_assigned():
-                        funcsymb = sym
-                        break
-
-                # Examine the function symbol object
-                if not funcsymb:
-                    # Did not find the function. Probably from import *
-                    obfuscate = 0
-                elif funcsymb.is_imported():
-                    obfuscate = 0
-                elif funcsymb.is_namespace():
-                    functab = funcsymb.get_namespace()
-                    obfuscate = self.namespace_obfuscate(functab, keyword_id)
-                else:
-                    # What is this?!?
-                    print >>sys.stderr, "Internal error: function symbol %s" % funcsymb
-                    print >>sys.stderr, "is neither imported nor a namespace!"
-                    sys.exit(1)
-
-            self.addToNames(keyword_line, keyword_id, obfuscate)
-            eq = elements[2]
-            assert eq[0] == token.EQUAL
-
-            # Let handle_atom handle the rest.
+            # Let the obfuscator continue handling the value
             elements = elements[3]
 
         for node in elements:
@@ -680,35 +678,6 @@ class CSTWalker:
             test = elements[4]
             for node in test:
                 self.walk(node, symtabs + [lambdatab])
-
-
-    def handle_power(self, elements, symtabs):
-        # power: atom trailer* ['**' factor]
-        # elements is like:
-        # (304, (305, (1, 'y', 3)))
-        # or
-        # (304, (305, (1, 'sys', 8)), (308, (23, '.', 8), (1, 'path', 8)))
-        # or
-        # (304, (305, (2, '2', 3)), (36, '**', 3), (303, (304, (305, (2, '2', 3)))))
-        #
-        # The purpose of this method is to make sure other methods,
-        # such as handle_argument, knows which function we are
-        # dealing, in the case of a functioncall. 
-        functioncall = ""
-        atom = elements[1]
-        assert atom[0] == symbol.atom
-        atomobj = atom[1]
-
-        if len(elements) > 2:
-            trailer_or_doublestar = elements[2]
-            if trailer_or_doublestar[0] == symbol.trailer:
-                # We have a trailer, so this is possibly a function call.
-                trailerobj = trailer_or_doublestar[1]
-                if (atomobj[0] == token.NAME) and (trailerobj[0] == token.LPAR):
-                    functioncall = atomobj[1]
-
-        for node in elements:
-            self.walk(node, symtabs, functioncall)
 
 
     def get_varargs_names(elements):
@@ -838,23 +807,29 @@ class ColumnExtractor:
                 self.this_lineno += 1
                 self.symboltimes = {}
             elif t_type == tokenize.NAME:
+                # Make life easier on us by ignoring keywords
+                if keyword.iskeyword(t_string):
+                    continue
+
                 srow = t_srow_scol[0]
                 scol = t_srow_scol[1]
-                namedict = self.names.get(srow)
-                if namedict:
-                    # There are interesting symbols on this line
-                    occurancelist = namedict.get(t_string)
-                    if occurancelist:
-                        # This symbol is interesting
-                        seen_times = self.saw_symbol(t_string)
 
-                        # If this assertion fails, then step 1 failed
-                        # to find all names. 
-                        assert len(occurancelist) > seen_times
-                        if occurancelist[seen_times]:
-                            # This occurance should be obfuscated.
-                            assert self.result.get((srow, scol)) == None
-                            self.result[(srow, scol)] = t_string
+                namedict = self.names.get(srow)
+                if not namedict:
+                    raise RuntimeError("Overlooked symbol '%s' on line %d column %d" % (t_string, srow, scol))
+
+                occurancelist = namedict.get(t_string)
+                if not occurancelist:
+                    raise RuntimeError("Overlooked symbol '%s' on line %d column %d" % (t_string, srow, scol))
+
+                seen_times = self.saw_symbol(t_string)
+                if seen_times > len(occurancelist):
+                    raise RuntimeError("Overlooked symbol '%s' on line %d column %d" % (t_string, srow, scol))
+
+                if occurancelist[seen_times]:
+                    # This occurance should be obfuscated.
+                    assert self.result.get((srow, scol)) == None
+                    self.result[(srow, scol)] = t_string
 
 
     def saw_symbol(self, name):
