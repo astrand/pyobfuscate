@@ -1,0 +1,10 @@
+#!/bin/bash
+
+# Obfuscate the obfuscator as a torture test
+
+../pyobfuscate ../pyobfuscate > pyobfuscate
+chmod u+x pyobfuscate
+
+for fn in test_*.py; do
+	./pyobfuscate $fn | python -
+done
