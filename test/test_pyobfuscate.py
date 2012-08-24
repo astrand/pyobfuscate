@@ -18,7 +18,7 @@ class ObfuscateTest(unittest.TestCase):
             return os.open(fname, os.O_RDWR|os.O_CREAT), fname
 
     def run_pyobfuscate(self, testfile, args=[]):
-        cmdline = ["./pyobfuscate"] + args + [testfile]
+        cmdline = ["../pyobfuscate"] + args + [testfile]
         p = subprocess.Popen(cmdline,
                              stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
@@ -122,7 +122,7 @@ class ObfuscateTest(unittest.TestCase):
 
     def test_import_dyn_all(self):
         """Verify that trying to import from a file with dynamic __all__ fails"""
-        cmdline = ["./pyobfuscate", "testfiles/dyn_all.py"]        
+        cmdline = ["../pyobfuscate", "testfiles/dyn_all.py"]        
         p = subprocess.Popen(cmdline,
                              stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
