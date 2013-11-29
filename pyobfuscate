@@ -189,6 +189,8 @@ class CSTWalker:
             self.handle_argument(elements, symtabs)
         elif production == symbol.lambdef:
             self.handle_lambdef(elements, symtabs)
+        elif production == symbol.decorator:
+            self.handle_decorator(elements, symtabs)
         else:
             for node in elements:
                 self.walk(node, symtabs)
@@ -627,7 +629,7 @@ class CSTWalker:
         # (302, (303, (304, (305, (3, '"SC_OPEN_MAX"', 15
 
         # Keyword argument?
-        if len(elements) >= 3:
+        if len(elements) >= 4:
             # keyword=test
             # FIXME: A bit ugly...
             if sys.hexversion >= 0x2040000:
@@ -681,6 +683,19 @@ class CSTWalker:
             for node in test:
                 self.walk(node, symtabs + [lambdatab])
 
+    def handle_decorator(self, elements, symtabs):
+        # decorator: '@' NAME parameters
+        # elements is something like:
+        # (259, (50, '@', 39), (288, (1, 'f', 39)), (4, '', 39))
+        name = elements[2][1]
+        assert name[0] == token.NAME
+        id = name[1]
+        line = name[2]
+        obfuscate = self.should_obfuscate(id, symtabs)
+
+        self.addToNames(line, id, obfuscate)
+        for node in elements:
+            self.walk(node, symtabs)
 
     def get_varargs_names(elements):
         """Extract all argument names and lines from varargslist"""
