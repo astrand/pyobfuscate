@@ -225,8 +225,10 @@ class CSTWalker:
         # up (needed for private class/object members)
         orig_id = id
         id = self.mangle_name(symtabs, id)
-
-        s = tab.lookup(id)
+        try:
+            s = tab.lookup(id)
+        except Exception:
+            return False
 
         # XXX: Debug code
         #      Add the symbols you want to examine to this list
@@ -913,6 +915,15 @@ class TokenPrinter:
                 self.pending_newlines += t_srow_scol[0] - self.this_lineno
                 self.this_lineno = t_srow_scol[0]
 
+            if t_type in [tokenize.NL, tokenize.NEWLINE]:
+                for x in range(self.pending_newlines):
+                    if conf.blanks != conf.KEEP_BLANKS:
+                        self.pending.append(self.gen_noop_line() + "\n")
+                        self.pending_indent = self.indent
+                    else:
+                        sys.stdout.write("\n")
+                self.pending_newlines = 0
+
             if t_type == tokenize.NL:
                 if self.first_on_line and conf.blanks != conf.KEEP_BLANKS:
                     self.pending.append(self.gen_noop_line() + "\n")
@@ -924,14 +935,6 @@ class TokenPrinter:
                     self.commentstate = TokenPrinter.AFTERCOMMENT
                 
             elif t_type == tokenize.NEWLINE:
-                for x in range(self.pending_newlines):
-                    if conf.blanks != conf.KEEP_BLANKS:
-                        self.pending.append(self.gen_noop_line() + "\n")
-                        self.pending_indent = self.indent
-                    else:
-                        sys.stdout.write("\n")
-                
-                self.pending_newlines = 0
                 self.first_on_line = 1
                 self.this_lineno += 1
                 sys.stdout.write("\n")
