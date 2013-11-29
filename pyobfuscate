@@ -189,6 +189,8 @@ class CSTWalker:
             self.handle_argument(elements, symtabs)
         elif production == symbol.lambdef:
             self.handle_lambdef(elements, symtabs)
+        elif production == symbol.decorator:
+            self.handle_decorator(elements, symtabs)
         else:
             for node in elements:
                 self.walk(node, symtabs)
@@ -225,8 +227,10 @@ class CSTWalker:
         # up (needed for private class/object members)
         orig_id = id
         id = self.mangle_name(symtabs, id)
-
-        s = tab.lookup(id)
+        try:
+            s = tab.lookup(id)
+        except Exception:
+            return False
 
         # XXX: Debug code
         #      Add the symbols you want to examine to this list
@@ -625,7 +629,7 @@ class CSTWalker:
         # (302, (303, (304, (305, (3, '"SC_OPEN_MAX"', 15
 
         # Keyword argument?
-        if len(elements) >= 3:
+        if len(elements) >= 4:
             # keyword=test
             # FIXME: A bit ugly...
             if sys.hexversion >= 0x2040000:
@@ -679,6 +683,19 @@ class CSTWalker:
             for node in test:
                 self.walk(node, symtabs + [lambdatab])
 
+    def handle_decorator(self, elements, symtabs):
+        # decorator: '@' NAME parameters
+        # elements is something like:
+        # (259, (50, '@', 39), (288, (1, 'f', 39)), (4, '', 39))
+        name = elements[2][1]
+        assert name[0] == token.NAME
+        id = name[1]
+        line = name[2]
+        obfuscate = self.should_obfuscate(id, symtabs)
+
+        self.addToNames(line, id, obfuscate)
+        for node in elements:
+            self.walk(node, symtabs)
 
     def get_varargs_names(elements):
         """Extract all argument names and lines from varargslist"""
@@ -913,6 +930,15 @@ class TokenPrinter:
                 self.pending_newlines += t_srow_scol[0] - self.this_lineno
                 self.this_lineno = t_srow_scol[0]
 
+            if t_type in [tokenize.NL, tokenize.NEWLINE]:
+                for x in range(self.pending_newlines):
+                    if conf.blanks != conf.KEEP_BLANKS:
+                        self.pending.append(self.gen_noop_line() + "\n")
+                        self.pending_indent = self.indent
+                    else:
+                        sys.stdout.write("\n")
+                self.pending_newlines = 0
+
             if t_type == tokenize.NL:
                 if self.first_on_line and conf.blanks != conf.KEEP_BLANKS:
                     self.pending.append(self.gen_noop_line() + "\n")
@@ -924,14 +950,6 @@ class TokenPrinter:
                     self.commentstate = TokenPrinter.AFTERCOMMENT
                 
             elif t_type == tokenize.NEWLINE:
-                for x in range(self.pending_newlines):
-                    if conf.blanks != conf.KEEP_BLANKS:
-                        self.pending.append(self.gen_noop_line() + "\n")
-                        self.pending_indent = self.indent
-                    else:
-                        sys.stdout.write("\n")
-                
-                self.pending_newlines = 0
                 self.first_on_line = 1
                 self.this_lineno += 1
                 sys.stdout.write("\n")
