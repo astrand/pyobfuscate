@@ -1,3 +1,34 @@
+This fork fixes Issue #19: Install location hardcoded as `/usr/bin`.
+
+Install Commands
+```
+git clone https://github.com/TQwan/pyobfuscate.git
+python setup.py install
+```
+
+This is for people that experience this bug:
+```
+Traceback (most recent call last):
+  File "setup.py", line 17, in <module>
+    data_files=[('/usr/bin', ['pyobfuscate'])]
+  File "D:\Anaconda3\lib\distutils\core.py", line 148, in setup
+    dist.run_commands()
+  File "D:\Anaconda3\lib\distutils\dist.py", line 955, in run_commands
+    self.run_command(cmd)
+  File "D:\Anaconda3\lib\distutils\dist.py", line 974, in run_command
+    cmd_obj.run()
+  File "D:\Anaconda3\lib\distutils\command\install.py", line 551, in run
+    self.run_command(cmd_name)
+  File "D:\Anaconda3\lib\distutils\cmd.py", line 313, in run_command
+    self.distribution.run_command(command)
+  File "D:\Anaconda3\lib\distutils\dist.py", line 974, in run_command
+    cmd_obj.run()
+  File "D:\Anaconda3\lib\distutils\command\install_data.py", line 56, in run
+    dir = convert_path(f[0])
+  File "D:\Anaconda3\lib\distutils\util.py", line 125, in convert_path
+    raise ValueError("path '%s' cannot be absolute" % pathname)
+ValueError: path '/usr/bin' cannot be absolute
+```
 
 pyobfuscate - Python source code obfuscator
 ===========================================
