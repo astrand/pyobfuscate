@@ -14,5 +14,5 @@ setup (name = "pyobfuscate",
        author = "Peter Astrand",
        author_email = "astrand@cendio.se",
        url = "http://www.lysator.liu.se/~astrand/projects/pyobfuscate/",
-       data_files=[('/usr/bin', ['pyobfuscate'])]
+       scripts=['pyobfuscate']
        )
