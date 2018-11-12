@@ -5,6 +5,15 @@ Install Commands
 git clone https://github.com/TQwan/pyobfuscate.git
 python setup.py install
 ```
+Example Result Output
+```
+running install
+running build
+running build_scripts
+running install_scripts
+running install_egg_info
+Writing D:\Anaconda3\Lib\site-packages\pyobfuscate-0.3-py3.5.egg-info
+```
 
 This is for people that experience this bug:
 ```
