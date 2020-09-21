@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*-mode: python; coding: utf-8 -*-
 #
 # pyobfuscate - Python source code obfuscator
@@ -19,7 +19,6 @@
 # Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 import sys
-import types
 import symbol
 import token
 import keyword
@@ -28,7 +27,7 @@ import compiler
 import parser
 import random
 import symtable
-import StringIO
+import io
 import getopt
 import re
 
@@ -42,7 +41,7 @@ class NameTranslator:
 
     def get_name(self, name):
         """Get a translation for a real name"""
-        if not self.realnames.has_key(name):
+        if name not in self.realnames:
             self.realnames[name] = self.gen_unique_name()
         return self.realnames[name]
 
@@ -60,9 +59,9 @@ class NameTranslator:
     def gen_unique_name(self):
         """Generate a name that hasn't been used before;
         not as a real name, not as a bogus name"""
-        existing_names = self.realnames.values() + self.bogusnames
+        existing_names = list(self.realnames.values()) + self.bogusnames
         name = ""
-        while 1:
+        while True:
             name += self.gen_name()
             if name not in existing_names:
                 break
@@ -114,7 +113,7 @@ class LambdaSymTable:
 
 
     def is_lambda_arg(self, id):
-        return self.mysymbs.has_key(id)
+        return id in self.mysymbs
 
 
 class CSTWalker:
@@ -159,7 +158,7 @@ class CSTWalker:
 
     def walk(self, elements, symtabs):
         # We are not interested in terminal tokens
-        if type(elements) != types.TupleType:
+        if not isinstance(elements, tuple):
             return
         if token.ISTERMINAL(elements[0]):
             return
@@ -203,7 +202,7 @@ class CSTWalker:
         if not name.startswith("__"):
             return name
 
-        for i in xrange(len(symtabs)):
+        for i in range(len(symtabs)):
             tab = symtabs[-1 - i]
             tabtype = tab.get_type()
             if tabtype == "class":
@@ -236,11 +235,11 @@ class CSTWalker:
         #      Add the symbols you want to examine to this list
         debug_symbols = []
         if id in debug_symbols:
-            print >>sys.stderr, "%s:" % id
-            print >>sys.stderr, "  Imported:", s.is_imported()
-            print >>sys.stderr, "  Parameter:", s.is_parameter()
-            print >>sys.stderr, "  Global:", s.is_global()
-            print >>sys.stderr, "  Local:", s.is_local()
+            print("%s:" % id, file=sys.stderr)
+            print("  Imported:", s.is_imported(), file=sys.stderr)
+            print("  Parameter:", s.is_parameter(), file=sys.stderr)
+            print("  Global:", s.is_global(), file=sys.stderr)
+            print("  Local:", s.is_local(), file=sys.stderr)
 
         # Explicit imports are a clear no
         if s.is_imported():
@@ -287,10 +286,10 @@ class CSTWalker:
 
             # XXX: See above:
             if id in debug_symbols:
-                print >>sys.stderr, "  Imported (G):", topsym.is_imported()
-                print >>sys.stderr, "  Parameter (G):", topsym.is_parameter()
-                print >>sys.stderr, "  Global (G):", topsym.is_global()
-                print >>sys.stderr, "  Local (G):", topsym.is_local()
+                print("  Imported (G):", topsym.is_imported(), file=sys.stderr)
+                print("  Parameter (G):", topsym.is_parameter(), file=sys.stderr)
+                print("  Global (G):", topsym.is_global(), file=sys.stderr)
+                print("  Local (G):", topsym.is_local(), file=sys.stderr)
 
             # Explicit imports are a clear no
             if topsym.is_imported():
@@ -380,7 +379,7 @@ class CSTWalker:
         tab = symtabs[-1]
 
         for tok in elements:
-            if type(tok) != types.TupleType:
+            if not isinstance(tok, tuple):
                 continue
 
             toktype = tok[0]
@@ -697,13 +696,14 @@ class CSTWalker:
         for node in elements:
             self.walk(node, symtabs)
 
+    @staticmethod
     def get_varargs_names(elements):
         """Extract all argument names and lines from varargslist"""
         result = []
 
         next_is_name = False
         for tok in elements:
-            if type(tok) != types.TupleType:
+            if not isinstance(tok, tuple):
                 continue
 
             toktype = tok[0]
@@ -720,15 +720,13 @@ class CSTWalker:
 
         return result
 
-    get_varargs_names = staticmethod(get_varargs_names)
-
-
+    @staticmethod
     def get_fpdef_names(elements):
         """Extract all argument names from fpdef"""
         result = []
 
         # We are not interested in terminal tokens
-        if type(elements) != types.TupleType:
+        if not isinstance(elements, tuple):
             return result
         if token.ISTERMINAL(elements[0]):
             return result
@@ -741,9 +739,6 @@ class CSTWalker:
         for node in elements:
             result.extend(CSTWalker.get_fpdef_names(node))
         return result
-
-    get_fpdef_names = staticmethod(get_fpdef_names)
-
  
 
 class PubApiExtractor:
@@ -756,14 +751,13 @@ class PubApiExtractor:
             # Didn't find __all__.
             if conf.allpublic:
                 symtab = symtable.symtable(source_no_encoding, "-", "exec")
-                self.pubapi = filter(lambda s: s[0] != "_",
-                                     symtab.get_identifiers())
+                self.pubapi = [s for s in symtab.get_identifiers() if s[0] != "_"]
             else:
                 self.pubapi = []
 
         if self.matches > 1:
-            print >>sys.stderr, "Warning: Found multiple __all__ definitions"
-            print >>sys.stderr, "Using last definition"
+            print("Warning: Found multiple __all__ definitions", file=sys.stderr)
+            print("Using last definition", file=sys.stderr)
 
 
     def visitAssign(self, node):
@@ -787,7 +781,7 @@ class PubApiExtractor:
                             break
 
                 if not constant:
-                    print >>sys.stderr, "Error: __all__ is not a list of constants."
+                    print("Error: __all__ is not a list of constants.", file=sys.stderr)
                     sys.exit(1)
 
 
@@ -805,7 +799,7 @@ class ColumnExtractor:
         # To detect line num changes; backslash constructs doesn't
         # generate any token
         self.this_lineno = 1
-        f = StringIO.StringIO(source)
+        f = io.StringIO(source)
         self.parse(f)
 
 
@@ -889,7 +883,7 @@ class TokenPrinter:
             self.commentstate = TokenPrinter.AFTERCOMMENT
         else:
             self.commentstate = TokenPrinter.BEFORECOMMENT
-        f = StringIO.StringIO(source)
+        f = io.StringIO(source)
         self.play(f)
 
 
@@ -1015,8 +1009,7 @@ class TokenPrinter:
     def line_append(self, s):
         if self.pending:
             indent = max(self.indent, self.pending_indent)
-            self.pending = map(lambda row: " "*indent + row,
-                               self.pending)
+            self.pending = [" "*indent + row for row in self.pending]
             if conf.blanks == conf.OBFUSCATE_BLANKS:
                 sys.stdout.write(''.join(self.pending))
             self.pending = []
@@ -1047,7 +1040,7 @@ class TokenPrinter:
 
 
 def strip_encoding(source):
-    f = StringIO.StringIO(source)
+    f = io.StringIO(source)
     lines = [f.readline(), f.readline()]
     buf = ""
     for line in lines:
@@ -1057,7 +1050,7 @@ def strip_encoding(source):
                 buf += "\n"
             else:
                 # Gosh, not a comment.
-                print >>sys.stderr, "ERROR: Python 2.3 with coding declaration in non-comment!"
+                print("ERROR: Python 2.3 with coding declaration in non-comment!", file=sys.stderr)
                 sys.exit(1)
         else:
             # Coding declaration not found on this line; add
@@ -1069,7 +1062,7 @@ def strip_encoding(source):
 
 
 def usage():
-    print >>sys.stderr, """
+    print("""
 Usage:
     
 pyobfuscate [options] <file>
@@ -1086,7 +1079,7 @@ Options:
 -a, --allpublic	        When __all__ is missing, assume everything is public.
                         The default is to assume nothing is public. 
 -v, --verbose	        Verbose mode.
-"""
+""", file=sys.stderr)
 
 
 class Configuration:
@@ -1102,8 +1095,8 @@ class Configuration:
                                         "verbose"])
             if len(args) != 1:
                 raise getopt.GetoptError("A filename is required", "")
-        except getopt.GetoptError, e:
-            print >>sys.stderr, "Error:", e
+        except getopt.GetoptError as e:
+            print("Error:", e, file=sys.stderr)
             usage()
             sys.exit(2)
 
@@ -1182,7 +1175,7 @@ def main():
     
     # Step 5: Output a marker that makes it possible to recognize
     # obfuscated files
-    print "# dd678faae9ac167bc83abf78e5cb2f3f0688d3a3"
+    print("# dd678faae9ac167bc83abf78e5cb2f3f0688d3a3")
 
 if __name__ == "__main__":
     main()

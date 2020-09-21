@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # pyobfuscate - Python source code obfuscator
 # 
 # Copyright 2004-2007 Peter Astrand <astrand@cendio.se> for Cendio AB
@@ -28,13 +28,13 @@ def get_origin_dir():
 
 
 def usage():
-    print >>sys.stderr, """
+    print("""
 Install and obfuscate a Python file in one step. 
     
 Usage:
 pyobfuscate-install [-m <mode>] [pyobfuscate-args] <source> <dest>
 
-    """
+    """, file=sys.stderr)
     sys.exit(1)
 
 
@@ -43,7 +43,7 @@ def main():
         usage()
     
     origin = get_origin_dir()
-    mode = 0755
+    mode = 0o755
     rest = []
     next_is_mode = False
     for arg in sys.argv[1:]:
@@ -63,7 +63,7 @@ def main():
 
     cmd = os.path.join(origin, "pyobfuscate")
     cmd += " " + source + " >" + dest
-    print >>sys.stderr, "Calling", cmd
+    print("Calling", cmd, file=sys.stderr)
     retcode = os.system(cmd)
     os.chmod(dest, mode)
     if retcode > 254:

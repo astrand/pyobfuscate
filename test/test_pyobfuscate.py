@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import unittest
 import sys
@@ -23,15 +23,16 @@ class ObfuscateTest(unittest.TestCase):
                              stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
         (stdout, stderr) = p.communicate()
-        assert '' == stderr, "pyobfuscate wrote to stderr: %s" % stderr
-        return stdout
+        assert b'' == stderr, "pyobfuscate wrote to stderr: %s" % stderr
+        return stdout.decode()
 
     def obfuscate_and_write(self, testfile, outfile, args=[]):
-        open(outfile, 'w').write(self.run_pyobfuscate(testfile, args))
+        with open(outfile, 'w') as f:
+            f.write(self.run_pyobfuscate(testfile, args))
 
     def run_src(self, src):
         f, fname = self.mkstemp()
-        os.write(f, src)
+        os.write(f, src.encode())
         os.close(f)
         retcode = subprocess.call([sys.executable, fname])
         os.remove(fname)
@@ -127,7 +128,7 @@ class ObfuscateTest(unittest.TestCase):
                              stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
         (stdout, stderr) = p.communicate()
-        assert -1 != stderr.find("__all__ is not a list of constants"), "pyobufscate didn't bail out with an error on file with dynamic __all__"
+        assert -1 != stderr.find(b"__all__ is not a list of constants"), "pyobufscate didn't bail out with an error on file with dynamic __all__"
 
     def test_import_with_keywords(self):
         """Verify that an imported class, defined in __all__, does not get obfuscated keyword arguments"""

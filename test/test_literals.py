@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import unittest
 
@@ -19,8 +19,8 @@ dictionary = {
 
 class LiteralTest(unittest.TestCase):
     def test_dictionary(self):
-        self.assertTrue("key1" in dictionary.keys())
-        self.assertTrue("key2" in dictionary.keys())
+        self.assertTrue("key1" in list(dictionary.keys()))
+        self.assertTrue("key2" in list(dictionary.keys()))
         self.assertEqual(dictionary["key1"][5], "foo")
         self.assertEqual(dictionary["key2"][5], "foo")
 
