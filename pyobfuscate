@@ -23,7 +23,7 @@ import symbol
 import token
 import keyword
 import tokenize
-import compiler
+import ast
 import parser
 import random
 import symtable
@@ -737,12 +737,12 @@ class CSTWalker:
         return result
  
 
-class PubApiExtractor:
+class PubApiExtractor(ast.NodeVisitor):
     def __init__(self, source):
-        ast = compiler.parse(source)
+        root = ast.parse(source)
         self.pubapi = None
         self.matches = 0
-        compiler.walk(ast, self)
+        self.visit(root)
         if self.pubapi == None:
             # Didn't find __all__.
             if conf.allpublic:
@@ -756,22 +756,25 @@ class PubApiExtractor:
             print("Using last definition", file=sys.stderr)
 
 
-    def visitAssign(self, node):
-        for assnode in node.nodes:
-            if not isinstance(assnode, compiler.ast.AssName):
+    def visit_Assign(self, node):
+        for assnode in node.targets:
+            if not isinstance(assnode, ast.Name):
                 continue
-            
-            if assnode.name == "__all__" \
-                   and assnode.flags == compiler.consts.OP_ASSIGN:
+
+            if assnode.id == "__all__":
                 self.matches += 1
                 self.pubapi = []
                 # Verify that the expression is a list
-                constant = isinstance(node.expr, compiler.ast.List)
+                constant = isinstance(node.value, ast.List)
                 if constant:
-                    # Verify that each element in list is a Const node.
-                    for node in node.expr.getChildNodes():
-                        if isinstance(node, compiler.ast.Const):
+                    # Verify that each element in list is a constant
+                    # string node
+                    for node in node.value.elts:
+                        if (isinstance(node, ast.Constant) and
+                            isinstance(node.value, str)):
                             self.pubapi.append(node.value)
+                        elif isinstance(node, ast.Str):
+                            self.pubapi.append(node.s)
                         else:
                             constant = False
                             break
