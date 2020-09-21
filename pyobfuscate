@@ -29,7 +29,6 @@ import random
 import symtable
 import io
 import getopt
-import re
 
 TOKENBLANKS=1
 
@@ -117,13 +116,13 @@ class LambdaSymTable:
 
 
 class CSTWalker:
-    def __init__(self, source_no_encoding, pubapi):
+    def __init__(self, source, pubapi):
         # Our public API (__all__)
         self.pubapi = pubapi
         # Names of imported modules
         self.modnames = []
-        self.symtab = symtable.symtable(source_no_encoding, "-", "exec")
-        cst = parser.suite(source_no_encoding)
+        self.symtab = symtable.symtable(source, "-", "exec")
+        cst = parser.suite(source)
         elements = parser.ast2tuple(cst, line_info=1)
         self.names = {}
         self.walk(elements, [self.symtab])
@@ -631,10 +630,7 @@ class CSTWalker:
         if len(elements) >= 4:
             # keyword=test
             # FIXME: A bit ugly...
-            if sys.hexversion >= 0x2040000:
-                keyword = elements[1][1][1][1][1][1][1][1][1][1][1][1][1][1][1]
-            else:
-                keyword = elements[1][1][1][1][1][1][1][1][1][1][1][1][1][1]
+            keyword = elements[1][1][1][1][1][1][1][1][1][1][1][1][1][1][1]
             assert keyword[0] == token.NAME
             keyword_id = keyword[1]
             keyword_line = keyword[2]
@@ -742,15 +738,15 @@ class CSTWalker:
  
 
 class PubApiExtractor:
-    def __init__(self, source_no_encoding):
-        ast = compiler.parse(source_no_encoding)
+    def __init__(self, source):
+        ast = compiler.parse(source)
         self.pubapi = None
         self.matches = 0
         compiler.walk(ast, self)
         if self.pubapi == None:
             # Didn't find __all__.
             if conf.allpublic:
-                symtab = symtable.symtable(source_no_encoding, "-", "exec")
+                symtab = symtable.symtable(source, "-", "exec")
                 self.pubapi = [s for s in symtab.get_identifiers() if s[0] != "_"]
             else:
                 self.pubapi = []
@@ -960,9 +956,8 @@ class TokenPrinter:
                 
                 if self.first_on_line:
                     if self.commentstate in [TokenPrinter.BEFORECOMMENT, TokenPrinter.INSIDECOMMENT]:
-                        # Output comment. Only old Python includes newline. 
-                        if sys.hexversion >= 0x2040000: 
-                            t_string += "\n"
+                        # Output comment
+                        t_string += "\n"
                         self.line_append(t_string)
                     elif conf.blanks != conf.KEEP_BLANKS:
                         self.pending.append(self.gen_noop_line() + "\n")
@@ -972,15 +967,13 @@ class TokenPrinter:
                         
                     self.this_lineno += 1
                 else:
-                    if sys.hexversion >= 0x2040000: 
-                        sys.stdout.write("\n")
-                        self.this_lineno += 1
+                    sys.stdout.write("\n")
+                    self.this_lineno += 1
 
                 # tokenizer does not generate a NEWLINE after comment
                 self.first_on_line = 1
-                if sys.hexversion >= 0x2040000:
-                    # tokinizer generates NL after each COMMENT
-                    self.skip_token = 1
+                # tokinizer generates NL after each COMMENT
+                self.skip_token = 1
             elif t_type == tokenize.STRING:
                 if self.first_on_line:
                     # Skip over docstrings
@@ -1036,29 +1029,6 @@ class TokenPrinter:
             result += self.nametranslator.get_bogus_name() + " %s " % op
         result += self.nametranslator.get_bogus_name()
         return result
-
-
-
-def strip_encoding(source):
-    f = io.StringIO(source)
-    lines = [f.readline(), f.readline()]
-    buf = ""
-    for line in lines:
-        if re.search("coding[:=]\s*([-\w_.]+)", line):
-            if line.strip().startswith("#"):
-                # Add a empty line instead
-                buf += "\n"
-            else:
-                # Gosh, not a comment.
-                print("ERROR: Python 2.3 with coding declaration in non-comment!", file=sys.stderr)
-                sys.exit(1)
-        else:
-            # Coding declaration not found on this line; add
-            # unmodified
-            buf += line
-
-    return buf + f.read()
-
 
 
 def usage():
@@ -1134,17 +1104,10 @@ def main():
     conf = Configuration()
     random.seed(conf.seed)
 
-    source = open(conf.file, 'rU').read()
-
-    if sys.version_info[:2] == (2, 3):
-        # Enable Python 2.3 workaround for bug 898271.
-        source_no_encoding = strip_encoding(source)
-    else:
-        source_no_encoding = source
-        
+    source = open(conf.file, 'r').read()
 
     # Step 1: Extract __all__ from source. 
-    pae = PubApiExtractor(source_no_encoding)
+    pae = PubApiExtractor(source)
 
 
     # Step 2: Walk the CST tree. The result of this step is a
@@ -1153,7 +1116,7 @@ def main():
     # this symbol on this line. A 1 in this list means that the
     # occurance should be obfuscated; 0 means not. Example: {64:
     # {'foo': [0, 1], 'run': [0]}
-    cw = CSTWalker(source_no_encoding, pae.pubapi)
+    cw = CSTWalker(source, pae.pubapi)
 
 
     # Step 3: We need those column numbers! Use the tokenize module to
