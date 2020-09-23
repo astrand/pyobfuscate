@@ -123,7 +123,7 @@ class CSTWalker:
         self.modnames = []
         self.symtab = symtable.symtable(source, "-", "exec")
         cst = parser.suite(source)
-        elements = parser.ast2tuple(cst, line_info=1)
+        elements = parser.st2tuple(cst, line_info=1)
         self.names = {}
         self.walk(elements, [self.symtab])
         
