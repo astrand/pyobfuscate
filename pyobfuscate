@@ -4,6 +4,7 @@
 # pyobfuscate - Python source code obfuscator
 # 
 # Copyright 2004-2007 Peter Astrand <astrand@cendio.se> for Cendio AB
+# Copyright 2020 Pierre Ossman <ossman@cendio.se> for Cendio AB
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -165,10 +166,10 @@ class CSTWalker:
         production = elements[0]
         if production == symbol.funcdef:
             self.handle_funcdef(elements, symtabs)
+        elif production == symbol.typedargslist:
+            self.handle_typedargslist(elements, symtabs)
         elif production == symbol.varargslist:
             self.handle_varargslist(elements, symtabs)
-        elif production == symbol.fpdef:
-            self.handle_fpdef(elements, symtabs)
         elif production == symbol.import_as_name:
             self.handle_import_as_name(elements, symtabs)
         elif production == symbol.dotted_as_name:
@@ -189,6 +190,8 @@ class CSTWalker:
             self.handle_lambdef(elements, symtabs)
         elif production == symbol.decorator:
             self.handle_decorator(elements, symtabs)
+        elif production == symbol.except_clause:
+            self.handle_except_clause(elements, symtabs)
         else:
             for node in elements:
                 self.walk(node, symtabs)
@@ -368,13 +371,19 @@ class CSTWalker:
         for node in elements:
             self.walk(node, symtabs + functabs)
 
+    def handle_typedargslist(self, elements, symtabs):
+        # typedargslist: (tfpdef ['=' test] (',' [TYPE_COMMENT] tfpdef ['=' test])* ...
+
+        # FIXME: should handle type comments?
+
+        self.handle_varargslist(elements, symtabs)
 
     def handle_varargslist(self, elements, symtabs):
-        # varargslist: (fpdef ['=' test] ',')* ('*' NAME [',' '**' NAME] | '**' NAME) ...
+        # varargslist: vfpdef ['=' test ](',' vfpdef ['=' test])* ...
         # elements is something like:
         # (261, (262, (1, 'XXX', 37)), (12, ',', 37), (262, (1, 'bar', 38)), (22, '=', 38), (292, (293, (294,
         # The purpose of this method is to find vararg and kwarg names
-        # (which are not fpdefs).
+        # (which are not vfpdefs).
         tab = symtabs[-1]
 
         for tok in elements:
@@ -388,25 +397,22 @@ class CSTWalker:
                     # The [:-1] is because we actually are not in the
                     # functions scope yet. 
                     self.walk(node, symtabs[:-1])
-            elif toktype == token.NAME:
-                # This is either an "*args" or an "**kwargs". We could
-                # in theory obfuscate these as they cannot be referenced
-                # directly by the caller. However, we currently have no
-                # idea of telling that these are special when we hit the
-                # references to them. So for now we treat them as we
-                # would any other argument.
-                id = tok[1]
-                line = tok[2]
-                obfuscate = self.should_obfuscate(id, symtabs)
-                self.addToNames(line, id, obfuscate)
-            elif toktype == symbol.fpdef:
-                self.handle_fpdef(tok, symtabs)
+            elif toktype == symbol.tfpdef:
+                self.handle_tfpdef(tok, symtabs)
+            elif toktype == symbol.vfpdef:
+                self.handle_vfpdef(tok, symtabs)
             else:
                 assert(toktype in [token.STAR, token.DOUBLESTAR,
                                    token.COMMA, token.EQUAL])
 
-    def handle_fpdef(self, elements, symtabs):
-        # fpdef: NAME | '(' fplist ')'
+    def handle_tfpdef(self, elements, symtabs):
+        # tfpdef: NAME [':' test]
+
+        # Just ignore the type part
+        self.handle_vfpdef(elements, symtabs)
+
+    def handle_vfpdef(self, elements, symtabs):
+        # vfpdef: NAME
         # elements is something like:
         # (262, (1, 'self', 13))
         name = elements[1]
@@ -414,10 +420,7 @@ class CSTWalker:
         id = name[1]
         line = name[2]
         obfuscate = self.should_obfuscate(id, symtabs)
-
         self.addToNames(line, id, obfuscate)
-        for node in elements:
-            self.walk(node, symtabs)
 
 
     def handle_import_as_name(self, elements, symtabs):
@@ -589,7 +592,7 @@ class CSTWalker:
 
 
     def handle_classdef(self, elements, symtabs):
-        # classdef: 'class' NAME ['(' testlist ')'] ':' suite
+        # classdef: 'class' NAME ['(' arglist ')'] ':' suite
         # elements is something like:
         # (316, (1, 'class', 48), (1, 'SuperMyClass', 48), (11, ':', 48),
         name = elements[2]
@@ -606,10 +609,10 @@ class CSTWalker:
         assert aftername[0] in (token.COLON, token.LPAR)
         if aftername[0] == token.LPAR and aftername2[0] != token.RPAR:
             # This class is inherited
-            testlist = elements[4]
-            assert testlist[0] == symbol.testlist
-            # Parsing of testlist should be done in the original scope
-            for node in testlist:
+            arglist = elements[4]
+            assert arglist[0] == symbol.arglist
+            # Parsing of arglist should be done in the original scope
+            for node in arglist:
                 self.walk(node, symtabs)
             elements = elements[5:]
             
@@ -629,8 +632,13 @@ class CSTWalker:
         # Keyword argument?
         if len(elements) >= 4:
             # keyword=test
-            # FIXME: A bit ugly...
-            keyword = elements[1][1][1][1][1][1][1][1][1][1][1][1][1][1][1]
+
+            # Because test is used we need do dig down until we find
+            # the final NAME
+            keyword = elements[1]
+            while len(keyword) == 2:
+                keyword = keyword[1]
+
             assert keyword[0] == token.NAME
             keyword_id = keyword[1]
             keyword_line = keyword[2]
@@ -692,50 +700,45 @@ class CSTWalker:
         for node in elements:
             self.walk(node, symtabs)
 
+    def handle_except_clause(self, elements, symtabs):
+        # except_clause: 'except' [test ['as' NAME]]
+
+        # Has "as" part?
+        if len(elements) == 5:
+            name = elements[4]
+            assert name[0] == token.NAME
+            id = name[1]
+            line = name[2]
+
+            obfuscate = self.should_obfuscate(id, symtabs)
+            self.addToNames(line, id, obfuscate)
+
+        for node in elements:
+            self.walk(node, symtabs)
+
     @staticmethod
     def get_varargs_names(elements):
         """Extract all argument names and lines from varargslist"""
         result = []
 
-        next_is_name = False
         for tok in elements:
             if not isinstance(tok, tuple):
                 continue
 
             toktype = tok[0]
-            if next_is_name:
-                assert tok[0] == token.NAME
-                id = tok[1]
-                line = tok[2]
+            if toktype == symbol.vfpdef:
+                name = tok[1]
+                assert name[0] == token.NAME
+                id = name[1]
+                line = name[2]
                 result.append((line, id))
-                next_is_name = False
-            elif toktype in [token.STAR, token.DOUBLESTAR]:
-                next_is_name = True
-            elif toktype == symbol.fpdef:
-                result.extend(CSTWalker.get_fpdef_names(tok))
+            else:
+                assert(toktype in [symbol.test,
+                                   token.STAR, token.DOUBLESTAR,
+                                   token.COMMA, token.EQUAL])
 
         return result
 
-    @staticmethod
-    def get_fpdef_names(elements):
-        """Extract all argument names from fpdef"""
-        result = []
-
-        # We are not interested in terminal tokens
-        if not isinstance(elements, tuple):
-            return result
-        if token.ISTERMINAL(elements[0]):
-            return result
-
-        name = elements[1]
-        assert name[0] == token.NAME
-        id = name[1]
-        line = name[2]
-        result.append((line, id))
-        for node in elements:
-            result.extend(CSTWalker.get_fpdef_names(node))
-        return result
- 
 
 class PubApiExtractor(ast.NodeVisitor):
     def __init__(self, source):
