@@ -6,5 +6,8 @@
 chmod u+x pyobfuscate
 
 for fn in test_*.py; do
+	echo
+	echo "@@ $fn @@"
+	echo
 	./pyobfuscate $fn | python -
 done
