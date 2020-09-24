@@ -309,7 +309,11 @@ class CSTWalker:
             # We want to obfuscate b), but not a). But we cannot tell which
             # is which, so just leave both alone.
             if not topsym.is_local():
-                return False
+                # Symbol.is_local is currently broken upstream:
+                # https://bugs.python.org/issue41840
+                from _symtable import DEF_BOUND
+                if not (topsym._Symbol__flags & DEF_BOUND):
+                    return False
 
             # This is something we declared, so obfuscate unless it is
             # part of the module API.
