@@ -34,6 +34,14 @@ class GlocalAncestor(GlobalClass):
 class MixedAncestors(LocalClass, GlobalClass):
 	pass
 
+class PrivateMethods:
+	def __hidden_method(self, a, b):
+		c = a + b
+		return c
+
+	def public_method(self, a, b):
+		return self.__hidden_method(a, b)
+
 class ClassTest(unittest.TestCase):
 	def test_local(self):
 		self.assertFalse("LocalClass" in globals())
@@ -75,6 +83,11 @@ class ClassTest(unittest.TestCase):
 		self.assertFalse("MixedAncestors" in globals())
 		self.assertTrue(issubclass(MixedAncestors, LocalClass))
 		self.assertTrue(issubclass(MixedAncestors, GlobalClass))
+
+	def test_private_method(self):
+		self.assertFalse("PrivateMethods" in globals())
+		obj = PrivateMethods()
+		self.assertEqual(obj.public_method(4, 5), 9)
 
 if "__main__" == __name__:
     unittest.main()
