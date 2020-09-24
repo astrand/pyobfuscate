@@ -25,6 +25,15 @@ def nested_function(test):
 class EmptyAncestors():
 	pass
 
+class LocalAncestor(LocalClass):
+	pass
+
+class GlocalAncestor(GlobalClass):
+	pass
+
+class MixedAncestors(LocalClass, GlobalClass):
+	pass
+
 class ClassTest(unittest.TestCase):
 	def test_local(self):
 		self.assertFalse("LocalClass" in globals())
@@ -49,6 +58,23 @@ class ClassTest(unittest.TestCase):
 
 	def test_nested_function(self):
 		nested_function(self)
+
+	def test_local_ancestor(self):
+		self.assertFalse("LocalClass" in globals())
+		self.assertFalse("LocalAncestor" in globals())
+		self.assertTrue(issubclass(LocalAncestor, LocalClass))
+
+	def test_global_ancestor(self):
+		self.assertTrue("GlobalClass" in globals())
+		self.assertFalse("GlocalAncestor" in globals())
+		self.assertTrue(issubclass(GlocalAncestor, GlobalClass))
+
+	def test_mixed_ancestors(self):
+		self.assertFalse("LocalClass" in globals())
+		self.assertTrue("GlobalClass" in globals())
+		self.assertFalse("MixedAncestors" in globals())
+		self.assertTrue(issubclass(MixedAncestors, LocalClass))
+		self.assertTrue(issubclass(MixedAncestors, GlobalClass))
 
 if "__main__" == __name__:
     unittest.main()
