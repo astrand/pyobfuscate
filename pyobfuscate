@@ -40,6 +40,15 @@ with warnings.catch_warnings():
 
 TOKENBLANKS=1
 
+def get_source_encoding(source):
+    ''' Use tokenize to get the files encoding declaration '''
+    f = io.BytesIO(source)
+    tok = tokenize.tokenize(f.readline)
+    t_type, t_string, t_srow_scol, t_erow_ecol, t_line = next(tok)
+
+    assert t_type == tokenize.ENCODING
+    return t_string
+
 class NameTranslator:
     def __init__(self):
         self.realnames = {}
@@ -125,12 +134,13 @@ class LambdaSymTable:
 
 class CSTWalker:
     def __init__(self, source, pubapi):
+        encoding = get_source_encoding(source)
         # Our public API (__all__)
         self.pubapi = pubapi
         # Names of imported modules
         self.modnames = []
-        self.symtab = symtable.symtable(source, "-", "exec")
-        cst = parser.suite(source)
+        self.symtab = symtable.symtable(source.decode(encoding), "-", "exec")
+        cst = parser.suite(source.decode(encoding))
         elements = parser.st2tuple(cst, line_info=1)
         self.names = {}
         self.walk(elements, [self.symtab])
@@ -745,7 +755,8 @@ class PubApiExtractor(ast.NodeVisitor):
         if self.pubapi == None:
             # Didn't find __all__.
             if conf.allpublic:
-                symtab = symtable.symtable(source, "-", "exec")
+                encoding = get_source_encoding(source)
+                symtab = symtable.symtable(source.decode(encoding), "-", "exec")
                 self.pubapi = [s for s in symtab.get_identifiers() if s[0] != "_"]
             else:
                 self.pubapi = []
@@ -797,13 +808,16 @@ class ColumnExtractor:
         # To detect line num changes; backslash constructs doesn't
         # generate any token
         self.this_lineno = 1
-        f = io.StringIO(source)
+        f = io.BytesIO(source)
         self.parse(f)
 
 
     def parse(self, f):
-        for tok in tokenize.generate_tokens(f.readline):
+        for tok in tokenize.tokenize(f.readline):
             t_type, t_string, t_srow_scol, t_erow_ecol, t_line = tok
+
+            if t_type == tokenize.ENCODING:
+                continue
 
             assert self.this_lineno <= t_srow_scol[0]
             if self.this_lineno < t_srow_scol[0]:
@@ -862,6 +876,7 @@ class TokenPrinter:
         self.symboltimes = {}
         self.names = names
         self.nametranslator = NameTranslator()
+        self.encoding = None
         # Pending, obfuscated noop lines. We cannot add the noop lines
         # until we know what comes after. 
         self.pending = []
@@ -881,15 +896,20 @@ class TokenPrinter:
             self.commentstate = TokenPrinter.AFTERCOMMENT
         else:
             self.commentstate = TokenPrinter.BEFORECOMMENT
-        f = io.StringIO(source)
+        f = io.BytesIO(source)
         self.play(f)
 
 
     def play(self, f):
-        for tok in tokenize.generate_tokens(f.readline):
+        for tok in tokenize.tokenize(f.readline):
             t_type, t_string, t_srow_scol, t_erow_ecol, t_line = tok
 
             #print >>sys.stderr, "TTTT", tokenize.tok_name[t_type], repr(t_string), self.this_lineno, t_srow_scol[0]
+
+            if t_type == tokenize.ENCODING:
+                assert self.encoding == None
+                self.encoding = t_string
+                continue
 
             if t_type == tokenize.OP:
                 if t_string == "(":
@@ -928,7 +948,7 @@ class TokenPrinter:
                         self.pending.append(self.gen_noop_line() + "\n")
                         self.pending_indent = self.indent
                     else:
-                        sys.stdout.write("\n")
+                        sys.stdout.buffer.write(b"\n")
                 self.pending_newlines = 0
 
             if t_type == tokenize.NL:
@@ -936,7 +956,7 @@ class TokenPrinter:
                     self.pending.append(self.gen_noop_line() + "\n")
                     self.pending_indent = self.indent
                 else:
-                    sys.stdout.write("\n")
+                    sys.stdout.buffer.write(b"\n")
                 self.this_lineno += 1
                 if self.commentstate == TokenPrinter.INSIDECOMMENT:
                     self.commentstate = TokenPrinter.AFTERCOMMENT
@@ -944,7 +964,7 @@ class TokenPrinter:
             elif t_type == tokenize.NEWLINE:
                 self.first_on_line = 1
                 self.this_lineno += 1
-                sys.stdout.write("\n")
+                sys.stdout.buffer.write(b"\n")
                 if self.commentstate == TokenPrinter.INSIDECOMMENT:
                     self.commentstate = TokenPrinter.AFTERCOMMENT
                     
@@ -965,11 +985,11 @@ class TokenPrinter:
                         self.pending.append(self.gen_noop_line() + "\n")
                         self.pending_indent = self.indent
                     else:
-                        sys.stdout.write("\n")
+                        sys.stdout.buffer.write(b"\n")
                         
                     self.this_lineno += 1
                 else:
-                    sys.stdout.write("\n")
+                    sys.stdout.buffer.write(b"\n")
                     self.this_lineno += 1
 
                 # tokenizer does not generate a NEWLINE after comment
@@ -1002,18 +1022,21 @@ class TokenPrinter:
                 
 
     def line_append(self, s):
+        assert self.encoding != None
         if self.pending:
             indent = max(self.indent, self.pending_indent)
-            self.pending = [" "*indent + row for row in self.pending]
+            self.pending = [row.encode(self.encoding) for row in self.pending]
+            self.pending = [b" "*indent + row for row in self.pending]
             if conf.blanks == conf.OBFUSCATE_BLANKS:
-                sys.stdout.write(''.join(self.pending))
+                sys.stdout.buffer.write(b''.join(self.pending))
             self.pending = []
         
         if self.first_on_line:
-            sys.stdout.write(" "*self.indent)
+            sys.stdout.buffer.write(b" "*self.indent)
         else:
-            sys.stdout.write(" "*TOKENBLANKS)
-        sys.stdout.write(s)
+            sys.stdout.buffer.write(b" "*TOKENBLANKS)
+
+        sys.stdout.buffer.write(s.encode(self.encoding))
         self.first_on_line = 0
 
 
@@ -1105,8 +1128,7 @@ def main():
     global conf
     conf = Configuration()
     random.seed(conf.seed)
-
-    source = open(conf.file, 'r').read()
+    source = open(conf.file, mode='rb').read()
 
     # Step 1: Extract __all__ from source. 
     pae = PubApiExtractor(source)
