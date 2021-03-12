@@ -195,8 +195,6 @@ class CSTWalker:
             self.handle_argument(elements, symtabs)
         elif production == symbol.lambdef:
             self.handle_lambdef(elements, symtabs)
-        elif production == symbol.decorator:
-            self.handle_decorator(elements, symtabs)
         elif production == symbol.except_clause:
             self.handle_except_clause(elements, symtabs)
         else:
@@ -519,7 +517,8 @@ class CSTWalker:
         assert name[0] == token.NAME
         id = name[1]
         line = name[2]
-        self.addToNames(line, id, 0)
+        obfuscate = self.should_obfuscate(id, symtabs)
+        self.addToNames(line, id, obfuscate)
 
         # Sequence length should be even
         assert (len(elements) % 2 == 0)
@@ -696,20 +695,6 @@ class CSTWalker:
             test = elements[4]
             for node in test:
                 self.walk(node, symtabs + [lambdatab])
-
-    def handle_decorator(self, elements, symtabs):
-        # decorator: '@' NAME parameters
-        # elements is something like:
-        # (259, (50, '@', 39), (288, (1, 'f', 39)), (4, '', 39))
-        name = elements[2][1]
-        assert name[0] == token.NAME
-        id = name[1]
-        line = name[2]
-        obfuscate = self.should_obfuscate(id, symtabs)
-
-        self.addToNames(line, id, obfuscate)
-        for node in elements:
-            self.walk(node, symtabs)
 
     def handle_except_clause(self, elements, symtabs):
         # except_clause: 'except' [test ['as' NAME]]
