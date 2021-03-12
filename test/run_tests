@@ -11,5 +11,5 @@ for fn in test_*.py; do
 	echo
 	echo "@@ $fn @@"
 	echo
-	./pyobfuscate $fn | python -
+	./pyobfuscate $fn | python3 -
 done
