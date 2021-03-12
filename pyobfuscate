@@ -4,7 +4,7 @@
 # pyobfuscate - Python source code obfuscator
 # 
 # Copyright 2004-2007 Peter Astrand <astrand@cendio.se> for Cendio AB
-# Copyright 2020 Pierre Ossman <ossman@cendio.se> for Cendio AB
+# Copyright 2020-2021 Pierre Ossman <ossman@cendio.se> for Cendio AB
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -20,16 +20,23 @@
 # Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 import sys
-import symbol
 import token
 import keyword
 import tokenize
 import ast
-import parser
 import random
 import symtable
 import io
 import getopt
+
+# Python 3.9+ is needed for ast to fully replace parser, so ignore these
+# deprecation warnings for now
+
+import warnings
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+    import symbol
+    import parser
 
 TOKENBLANKS=1
 
