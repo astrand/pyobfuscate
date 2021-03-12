@@ -1,5 +1,7 @@
 #!/bin/bash
 
+cd `dirname "$0"`
+
 # Obfuscate the obfuscator as a torture test
 
 ../pyobfuscate ../pyobfuscate > pyobfuscate
