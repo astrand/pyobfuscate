@@ -157,7 +157,30 @@ class ObfuscateTest(unittest.TestCase):
         output = self.run_pyobfuscate("testfiles/bug1673.py")
         assert 49 == self.run_src(output), "Incorrect value returned after obfuscation"
 
-                                 
+    def test_allpublic(self):
+        """ Verify that we respect the --allpublic flag but still keep
+            functions starting with '_' hidden """
+        self.obfuscate_and_write("testfiles/tobeimported_noall.py",
+                                 "generated/tobeimported_noall.py",
+                                 args=["--allpublic"])
+        self.obfuscate_and_write("testfiles/allpublic.py",
+                                 "generated/allpublic.py")
+
+        res = subprocess.call([sys.executable, "generated/allpublic.py"])
+
+        assert 1 == res, "Incorrect value returned after obfuscation"
+
+    def test_allpublic_hidden(self):
+        """ Verify that we still keep functions starting with '_' hidden """
+        self.obfuscate_and_write("testfiles/tobeimported_noall.py",
+                                 "generated/tobeimported_noall.py",
+                                 args=["--allpublic"])
+        self.obfuscate_and_write("testfiles/allpublic_hidden.py",
+                                 "generated/allpublic_hidden.py")
+
+        res = subprocess.call([sys.executable, "generated/allpublic_hidden.py"])
+
+        assert 1 == res, "Incorrect value returned after obfuscation"
 
     
 if "__main__" == __name__:
