@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import unittest
 import sys
@@ -23,15 +23,16 @@ class ObfuscateTest(unittest.TestCase):
                              stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
         (stdout, stderr) = p.communicate()
-        assert '' == stderr, "pyobfuscate wrote to stderr: %s" % stderr
-        return stdout
+        assert b'' == stderr, "pyobfuscate wrote to stderr: %s" % stderr
+        return stdout.decode()
 
     def obfuscate_and_write(self, testfile, outfile, args=[]):
-        open(outfile, 'w').write(self.run_pyobfuscate(testfile, args))
+        with open(outfile, 'w') as f:
+            f.write(self.run_pyobfuscate(testfile, args))
 
     def run_src(self, src):
         f, fname = self.mkstemp()
-        os.write(f, src)
+        os.write(f, src.encode())
         os.close(f)
         retcode = subprocess.call([sys.executable, fname])
         os.remove(fname)
@@ -127,7 +128,7 @@ class ObfuscateTest(unittest.TestCase):
                              stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
         (stdout, stderr) = p.communicate()
-        assert -1 != stderr.find("__all__ is not a list of constants"), "pyobufscate didn't bail out with an error on file with dynamic __all__"
+        assert -1 != stderr.find(b"__all__ is not a list of constants"), "pyobufscate didn't bail out with an error on file with dynamic __all__"
 
     def test_import_with_keywords(self):
         """Verify that an imported class, defined in __all__, does not get obfuscated keyword arguments"""
@@ -156,7 +157,30 @@ class ObfuscateTest(unittest.TestCase):
         output = self.run_pyobfuscate("testfiles/bug1673.py")
         assert 49 == self.run_src(output), "Incorrect value returned after obfuscation"
 
-                                 
+    def test_allpublic(self):
+        """ Verify that we respect the --allpublic flag but still keep
+            functions starting with '_' hidden """
+        self.obfuscate_and_write("testfiles/tobeimported_noall.py",
+                                 "generated/tobeimported_noall.py",
+                                 args=["--allpublic"])
+        self.obfuscate_and_write("testfiles/allpublic.py",
+                                 "generated/allpublic.py")
+
+        res = subprocess.call([sys.executable, "generated/allpublic.py"])
+
+        assert 1 == res, "Incorrect value returned after obfuscation"
+
+    def test_allpublic_hidden(self):
+        """ Verify that we still keep functions starting with '_' hidden """
+        self.obfuscate_and_write("testfiles/tobeimported_noall.py",
+                                 "generated/tobeimported_noall.py",
+                                 args=["--allpublic"])
+        self.obfuscate_and_write("testfiles/allpublic_hidden.py",
+                                 "generated/allpublic_hidden.py")
+
+        res = subprocess.call([sys.executable, "generated/allpublic_hidden.py"])
+
+        assert 1 == res, "Incorrect value returned after obfuscation"
 
     
 if "__main__" == __name__:

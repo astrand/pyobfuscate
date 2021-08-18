@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import unittest
 
@@ -25,6 +25,23 @@ def nested_function(test):
 class EmptyAncestors():
 	pass
 
+class LocalAncestor(LocalClass):
+	pass
+
+class GlocalAncestor(GlobalClass):
+	pass
+
+class MixedAncestors(LocalClass, GlobalClass):
+	pass
+
+class PrivateMethods:
+	def __hidden_method(self, a, b):
+		c = a + b
+		return c
+
+	def public_method(self, a, b):
+		return self.__hidden_method(a, b)
+
 class ClassTest(unittest.TestCase):
 	def test_local(self):
 		self.assertFalse("LocalClass" in globals())
@@ -49,6 +66,28 @@ class ClassTest(unittest.TestCase):
 
 	def test_nested_function(self):
 		nested_function(self)
+
+	def test_local_ancestor(self):
+		self.assertFalse("LocalClass" in globals())
+		self.assertFalse("LocalAncestor" in globals())
+		self.assertTrue(issubclass(LocalAncestor, LocalClass))
+
+	def test_global_ancestor(self):
+		self.assertTrue("GlobalClass" in globals())
+		self.assertFalse("GlocalAncestor" in globals())
+		self.assertTrue(issubclass(GlocalAncestor, GlobalClass))
+
+	def test_mixed_ancestors(self):
+		self.assertFalse("LocalClass" in globals())
+		self.assertTrue("GlobalClass" in globals())
+		self.assertFalse("MixedAncestors" in globals())
+		self.assertTrue(issubclass(MixedAncestors, LocalClass))
+		self.assertTrue(issubclass(MixedAncestors, GlobalClass))
+
+	def test_private_method(self):
+		self.assertFalse("PrivateMethods" in globals())
+		obj = PrivateMethods()
+		self.assertEqual(obj.public_method(4, 5), 9)
 
 if "__main__" == __name__:
     unittest.main()

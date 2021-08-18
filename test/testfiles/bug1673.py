@@ -5,7 +5,7 @@ def foo():
     global gvar
     gvar += 2
     colliding = 33
-    assert 0 == locals().has_key("colliding")
+    assert 0 == ("colliding" in locals())
     return gvar
 sys.exit(foo())
 

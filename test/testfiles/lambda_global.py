@@ -1,13 +1,12 @@
-
 import sys
+import functools
 
-def sort(x, y):
-    return cmp(x,y)
+def smallest(x, y):
+    return min(x, y)
 
 def main():
-    l = [120,300,42]
-    l.sort(lambda x, y: sort(x, y))
-    return l[0]
+    l = [120, 300, 42]
+    return functools.reduce(lambda x, y: smallest(x, y), l)
 
 
 if "__main__" == __name__:

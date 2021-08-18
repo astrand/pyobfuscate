@@ -1,10 +1,20 @@
 #!/bin/bash
 
+cd `dirname "$0"`
+
 # Obfuscate the obfuscator as a torture test
 
 ../pyobfuscate ../pyobfuscate > pyobfuscate
 chmod u+x pyobfuscate
 
 for fn in test_*.py; do
-	./pyobfuscate $fn | python -
+	echo
+	echo "@@ $fn @@"
+	echo
+	# Piping source code with a different encoding compared to the
+	# terminal doesn't work with older versions of Python. We can
+	# bypass this if we first write to a file.
+	./pyobfuscate $fn > tmp_testfile
+	python3 tmp_testfile
+	rm tmp_testfile
 done

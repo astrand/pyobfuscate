@@ -1,9 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*-mode: python; coding: utf-8 -*-
 #
 # pyobfuscate - Python source code obfuscator
 # 
 # Copyright 2004-2007 Peter Astrand <astrand@cendio.se> for Cendio AB
+# Copyright 2020-2021 Pierre Ossman <ossman@cendio.se> for Cendio AB
 # 
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,20 +20,34 @@
 # Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
 import sys
-import types
-import symbol
 import token
 import keyword
 import tokenize
-import compiler
-import parser
+import ast
 import random
 import symtable
-import StringIO
+import io
 import getopt
-import re
+
+# Python 3.9+ is needed for ast to fully replace parser, so ignore these
+# deprecation warnings for now
+
+import warnings
+with warnings.catch_warnings():
+    warnings.filterwarnings("ignore", category=DeprecationWarning)
+    import symbol
+    import parser
 
 TOKENBLANKS=1
+
+def get_source_encoding(source):
+    ''' Use tokenize to get the files encoding declaration '''
+    f = io.BytesIO(source)
+    tok = tokenize.tokenize(f.readline)
+    t_type, t_string, t_srow_scol, t_erow_ecol, t_line = next(tok)
+
+    assert t_type == tokenize.ENCODING
+    return t_string
 
 class NameTranslator:
     def __init__(self):
@@ -42,7 +57,7 @@ class NameTranslator:
 
     def get_name(self, name):
         """Get a translation for a real name"""
-        if not self.realnames.has_key(name):
+        if name not in self.realnames:
             self.realnames[name] = self.gen_unique_name()
         return self.realnames[name]
 
@@ -60,9 +75,9 @@ class NameTranslator:
     def gen_unique_name(self):
         """Generate a name that hasn't been used before;
         not as a real name, not as a bogus name"""
-        existing_names = self.realnames.values() + self.bogusnames
+        existing_names = list(self.realnames.values()) + self.bogusnames
         name = ""
-        while 1:
+        while True:
             name += self.gen_name()
             if name not in existing_names:
                 break
@@ -114,18 +129,19 @@ class LambdaSymTable:
 
 
     def is_lambda_arg(self, id):
-        return self.mysymbs.has_key(id)
+        return id in self.mysymbs
 
 
 class CSTWalker:
-    def __init__(self, source_no_encoding, pubapi):
+    def __init__(self, source, pubapi):
+        encoding = get_source_encoding(source)
         # Our public API (__all__)
         self.pubapi = pubapi
         # Names of imported modules
         self.modnames = []
-        self.symtab = symtable.symtable(source_no_encoding, "-", "exec")
-        cst = parser.suite(source_no_encoding)
-        elements = parser.ast2tuple(cst, line_info=1)
+        self.symtab = symtable.symtable(source.decode(encoding), "-", "exec")
+        cst = parser.suite(source.decode(encoding))
+        elements = parser.st2tuple(cst, line_info=1)
         self.names = {}
         self.walk(elements, [self.symtab])
         
@@ -159,7 +175,7 @@ class CSTWalker:
 
     def walk(self, elements, symtabs):
         # We are not interested in terminal tokens
-        if type(elements) != types.TupleType:
+        if not isinstance(elements, tuple):
             return
         if token.ISTERMINAL(elements[0]):
             return
@@ -167,10 +183,10 @@ class CSTWalker:
         production = elements[0]
         if production == symbol.funcdef:
             self.handle_funcdef(elements, symtabs)
+        elif production == symbol.typedargslist:
+            self.handle_typedargslist(elements, symtabs)
         elif production == symbol.varargslist:
             self.handle_varargslist(elements, symtabs)
-        elif production == symbol.fpdef:
-            self.handle_fpdef(elements, symtabs)
         elif production == symbol.import_as_name:
             self.handle_import_as_name(elements, symtabs)
         elif production == symbol.dotted_as_name:
@@ -189,8 +205,8 @@ class CSTWalker:
             self.handle_argument(elements, symtabs)
         elif production == symbol.lambdef:
             self.handle_lambdef(elements, symtabs)
-        elif production == symbol.decorator:
-            self.handle_decorator(elements, symtabs)
+        elif production == symbol.except_clause:
+            self.handle_except_clause(elements, symtabs)
         else:
             for node in elements:
                 self.walk(node, symtabs)
@@ -203,7 +219,7 @@ class CSTWalker:
         if not name.startswith("__"):
             return name
 
-        for i in xrange(len(symtabs)):
+        for i in range(len(symtabs)):
             tab = symtabs[-1 - i]
             tabtype = tab.get_type()
             if tabtype == "class":
@@ -236,11 +252,11 @@ class CSTWalker:
         #      Add the symbols you want to examine to this list
         debug_symbols = []
         if id in debug_symbols:
-            print >>sys.stderr, "%s:" % id
-            print >>sys.stderr, "  Imported:", s.is_imported()
-            print >>sys.stderr, "  Parameter:", s.is_parameter()
-            print >>sys.stderr, "  Global:", s.is_global()
-            print >>sys.stderr, "  Local:", s.is_local()
+            print("%s:" % id, file=sys.stderr)
+            print("  Imported:", s.is_imported(), file=sys.stderr)
+            print("  Parameter:", s.is_parameter(), file=sys.stderr)
+            print("  Global:", s.is_global(), file=sys.stderr)
+            print("  Local:", s.is_local(), file=sys.stderr)
 
         # Explicit imports are a clear no
         if s.is_imported():
@@ -287,10 +303,10 @@ class CSTWalker:
 
             # XXX: See above:
             if id in debug_symbols:
-                print >>sys.stderr, "  Imported (G):", topsym.is_imported()
-                print >>sys.stderr, "  Parameter (G):", topsym.is_parameter()
-                print >>sys.stderr, "  Global (G):", topsym.is_global()
-                print >>sys.stderr, "  Local (G):", topsym.is_local()
+                print("  Imported (G):", topsym.is_imported(), file=sys.stderr)
+                print("  Parameter (G):", topsym.is_parameter(), file=sys.stderr)
+                print("  Global (G):", topsym.is_global(), file=sys.stderr)
+                print("  Local (G):", topsym.is_local(), file=sys.stderr)
 
             # Explicit imports are a clear no
             if topsym.is_imported():
@@ -308,7 +324,11 @@ class CSTWalker:
             # We want to obfuscate b), but not a). But we cannot tell which
             # is which, so just leave both alone.
             if not topsym.is_local():
-                return False
+                # Symbol.is_local is currently broken upstream:
+                # https://bugs.python.org/issue41840
+                from _symtable import DEF_BOUND
+                if not (topsym._Symbol__flags & DEF_BOUND):
+                    return False
 
             # This is something we declared, so obfuscate unless it is
             # part of the module API.
@@ -370,17 +390,23 @@ class CSTWalker:
         for node in elements:
             self.walk(node, symtabs + functabs)
 
+    def handle_typedargslist(self, elements, symtabs):
+        # typedargslist: (tfpdef ['=' test] (',' [TYPE_COMMENT] tfpdef ['=' test])* ...
+
+        # FIXME: should handle type comments?
+
+        self.handle_varargslist(elements, symtabs)
 
     def handle_varargslist(self, elements, symtabs):
-        # varargslist: (fpdef ['=' test] ',')* ('*' NAME [',' '**' NAME] | '**' NAME) ...
+        # varargslist: vfpdef ['=' test ](',' vfpdef ['=' test])* ...
         # elements is something like:
         # (261, (262, (1, 'XXX', 37)), (12, ',', 37), (262, (1, 'bar', 38)), (22, '=', 38), (292, (293, (294,
         # The purpose of this method is to find vararg and kwarg names
-        # (which are not fpdefs).
+        # (which are not vfpdefs).
         tab = symtabs[-1]
 
         for tok in elements:
-            if type(tok) != types.TupleType:
+            if not isinstance(tok, tuple):
                 continue
 
             toktype = tok[0]
@@ -390,25 +416,22 @@ class CSTWalker:
                     # The [:-1] is because we actually are not in the
                     # functions scope yet. 
                     self.walk(node, symtabs[:-1])
-            elif toktype == token.NAME:
-                # This is either an "*args" or an "**kwargs". We could
-                # in theory obfuscate these as they cannot be referenced
-                # directly by the caller. However, we currently have no
-                # idea of telling that these are special when we hit the
-                # references to them. So for now we treat them as we
-                # would any other argument.
-                id = tok[1]
-                line = tok[2]
-                obfuscate = self.should_obfuscate(id, symtabs)
-                self.addToNames(line, id, obfuscate)
-            elif toktype == symbol.fpdef:
-                self.handle_fpdef(tok, symtabs)
+            elif toktype == symbol.tfpdef:
+                self.handle_tfpdef(tok, symtabs)
+            elif toktype == symbol.vfpdef:
+                self.handle_vfpdef(tok, symtabs)
             else:
                 assert(toktype in [token.STAR, token.DOUBLESTAR,
                                    token.COMMA, token.EQUAL])
 
-    def handle_fpdef(self, elements, symtabs):
-        # fpdef: NAME | '(' fplist ')'
+    def handle_tfpdef(self, elements, symtabs):
+        # tfpdef: NAME [':' test]
+
+        # Just ignore the type part
+        self.handle_vfpdef(elements, symtabs)
+
+    def handle_vfpdef(self, elements, symtabs):
+        # vfpdef: NAME
         # elements is something like:
         # (262, (1, 'self', 13))
         name = elements[1]
@@ -416,10 +439,7 @@ class CSTWalker:
         id = name[1]
         line = name[2]
         obfuscate = self.should_obfuscate(id, symtabs)
-
         self.addToNames(line, id, obfuscate)
-        for node in elements:
-            self.walk(node, symtabs)
 
 
     def handle_import_as_name(self, elements, symtabs):
@@ -507,7 +527,8 @@ class CSTWalker:
         assert name[0] == token.NAME
         id = name[1]
         line = name[2]
-        self.addToNames(line, id, 0)
+        obfuscate = self.should_obfuscate(id, symtabs)
+        self.addToNames(line, id, obfuscate)
 
         # Sequence length should be even
         assert (len(elements) % 2 == 0)
@@ -591,7 +612,7 @@ class CSTWalker:
 
 
     def handle_classdef(self, elements, symtabs):
-        # classdef: 'class' NAME ['(' testlist ')'] ':' suite
+        # classdef: 'class' NAME ['(' arglist ')'] ':' suite
         # elements is something like:
         # (316, (1, 'class', 48), (1, 'SuperMyClass', 48), (11, ':', 48),
         name = elements[2]
@@ -608,10 +629,10 @@ class CSTWalker:
         assert aftername[0] in (token.COLON, token.LPAR)
         if aftername[0] == token.LPAR and aftername2[0] != token.RPAR:
             # This class is inherited
-            testlist = elements[4]
-            assert testlist[0] == symbol.testlist
-            # Parsing of testlist should be done in the original scope
-            for node in testlist:
+            arglist = elements[4]
+            assert arglist[0] == symbol.arglist
+            # Parsing of arglist should be done in the original scope
+            for node in arglist:
                 self.walk(node, symtabs)
             elements = elements[5:]
             
@@ -631,11 +652,13 @@ class CSTWalker:
         # Keyword argument?
         if len(elements) >= 4:
             # keyword=test
-            # FIXME: A bit ugly...
-            if sys.hexversion >= 0x2040000:
-                keyword = elements[1][1][1][1][1][1][1][1][1][1][1][1][1][1][1]
-            else:
-                keyword = elements[1][1][1][1][1][1][1][1][1][1][1][1][1][1]
+
+            # Because test is used we need do dig down until we find
+            # the final NAME
+            keyword = elements[1]
+            while len(keyword) == 2:
+                keyword = keyword[1]
+
             assert keyword[0] == token.NAME
             keyword_id = keyword[1]
             keyword_line = keyword[2]
@@ -683,111 +706,91 @@ class CSTWalker:
             for node in test:
                 self.walk(node, symtabs + [lambdatab])
 
-    def handle_decorator(self, elements, symtabs):
-        # decorator: '@' NAME parameters
-        # elements is something like:
-        # (259, (50, '@', 39), (288, (1, 'f', 39)), (4, '', 39))
-        name = elements[2][1]
-        assert name[0] == token.NAME
-        id = name[1]
-        line = name[2]
-        obfuscate = self.should_obfuscate(id, symtabs)
+    def handle_except_clause(self, elements, symtabs):
+        # except_clause: 'except' [test ['as' NAME]]
 
-        self.addToNames(line, id, obfuscate)
+        # Has "as" part?
+        if len(elements) == 5:
+            name = elements[4]
+            assert name[0] == token.NAME
+            id = name[1]
+            line = name[2]
+
+            obfuscate = self.should_obfuscate(id, symtabs)
+            self.addToNames(line, id, obfuscate)
+
         for node in elements:
             self.walk(node, symtabs)
 
+    @staticmethod
     def get_varargs_names(elements):
         """Extract all argument names and lines from varargslist"""
         result = []
 
-        next_is_name = False
         for tok in elements:
-            if type(tok) != types.TupleType:
+            if not isinstance(tok, tuple):
                 continue
 
             toktype = tok[0]
-            if next_is_name:
-                assert tok[0] == token.NAME
-                id = tok[1]
-                line = tok[2]
+            if toktype == symbol.vfpdef:
+                name = tok[1]
+                assert name[0] == token.NAME
+                id = name[1]
+                line = name[2]
                 result.append((line, id))
-                next_is_name = False
-            elif toktype in [token.STAR, token.DOUBLESTAR]:
-                next_is_name = True
-            elif toktype == symbol.fpdef:
-                result.extend(CSTWalker.get_fpdef_names(tok))
+            else:
+                assert(toktype in [symbol.test,
+                                   token.STAR, token.DOUBLESTAR,
+                                   token.COMMA, token.EQUAL])
 
         return result
 
-    get_varargs_names = staticmethod(get_varargs_names)
 
-
-    def get_fpdef_names(elements):
-        """Extract all argument names from fpdef"""
-        result = []
-
-        # We are not interested in terminal tokens
-        if type(elements) != types.TupleType:
-            return result
-        if token.ISTERMINAL(elements[0]):
-            return result
-
-        name = elements[1]
-        assert name[0] == token.NAME
-        id = name[1]
-        line = name[2]
-        result.append((line, id))
-        for node in elements:
-            result.extend(CSTWalker.get_fpdef_names(node))
-        return result
-
-    get_fpdef_names = staticmethod(get_fpdef_names)
-
- 
-
-class PubApiExtractor:
-    def __init__(self, source_no_encoding):
-        ast = compiler.parse(source_no_encoding)
+class PubApiExtractor(ast.NodeVisitor):
+    def __init__(self, source):
+        root = ast.parse(source)
         self.pubapi = None
         self.matches = 0
-        compiler.walk(ast, self)
+        self.visit(root)
         if self.pubapi == None:
             # Didn't find __all__.
             if conf.allpublic:
-                symtab = symtable.symtable(source_no_encoding, "-", "exec")
-                self.pubapi = filter(lambda s: s[0] != "_",
-                                     symtab.get_identifiers())
+                encoding = get_source_encoding(source)
+                symtab = symtable.symtable(source.decode(encoding), "-", "exec")
+                self.pubapi = [s for s in symtab.get_identifiers() if s[0] != "_"]
             else:
                 self.pubapi = []
 
         if self.matches > 1:
-            print >>sys.stderr, "Warning: Found multiple __all__ definitions"
-            print >>sys.stderr, "Using last definition"
+            print("Warning: Found multiple __all__ definitions", file=sys.stderr)
+            print("Using last definition", file=sys.stderr)
 
 
-    def visitAssign(self, node):
-        for assnode in node.nodes:
-            if not isinstance(assnode, compiler.ast.AssName):
+    def visit_Assign(self, node):
+        for assnode in node.targets:
+            if not isinstance(assnode, ast.Name):
                 continue
-            
-            if assnode.name == "__all__" \
-                   and assnode.flags == compiler.consts.OP_ASSIGN:
+
+            if assnode.id == "__all__":
                 self.matches += 1
                 self.pubapi = []
                 # Verify that the expression is a list
-                constant = isinstance(node.expr, compiler.ast.List)
+                constant = isinstance(node.value, ast.List)
                 if constant:
-                    # Verify that each element in list is a Const node.
-                    for node in node.expr.getChildNodes():
-                        if isinstance(node, compiler.ast.Const):
+                    # Verify that each element in list is a constant
+                    # string node
+                    for node in node.value.elts:
+                        if (isinstance(node, ast.Constant) and
+                            isinstance(node.value, str)):
                             self.pubapi.append(node.value)
+                        elif isinstance(node, ast.Str):
+                            self.pubapi.append(node.s)
                         else:
                             constant = False
                             break
 
                 if not constant:
-                    print >>sys.stderr, "Error: __all__ is not a list of constants."
+                    print("Error: __all__ is not a list of constants.", file=sys.stderr)
                     sys.exit(1)
 
 
@@ -805,13 +808,16 @@ class ColumnExtractor:
         # To detect line num changes; backslash constructs doesn't
         # generate any token
         self.this_lineno = 1
-        f = StringIO.StringIO(source)
+        f = io.BytesIO(source)
         self.parse(f)
 
 
     def parse(self, f):
-        for tok in tokenize.generate_tokens(f.readline):
+        for tok in tokenize.tokenize(f.readline):
             t_type, t_string, t_srow_scol, t_erow_ecol, t_line = tok
+
+            if t_type == tokenize.ENCODING:
+                continue
 
             assert self.this_lineno <= t_srow_scol[0]
             if self.this_lineno < t_srow_scol[0]:
@@ -870,6 +876,7 @@ class TokenPrinter:
         self.symboltimes = {}
         self.names = names
         self.nametranslator = NameTranslator()
+        self.encoding = None
         # Pending, obfuscated noop lines. We cannot add the noop lines
         # until we know what comes after. 
         self.pending = []
@@ -889,15 +896,20 @@ class TokenPrinter:
             self.commentstate = TokenPrinter.AFTERCOMMENT
         else:
             self.commentstate = TokenPrinter.BEFORECOMMENT
-        f = StringIO.StringIO(source)
+        f = io.BytesIO(source)
         self.play(f)
 
 
     def play(self, f):
-        for tok in tokenize.generate_tokens(f.readline):
+        for tok in tokenize.tokenize(f.readline):
             t_type, t_string, t_srow_scol, t_erow_ecol, t_line = tok
 
             #print >>sys.stderr, "TTTT", tokenize.tok_name[t_type], repr(t_string), self.this_lineno, t_srow_scol[0]
+
+            if t_type == tokenize.ENCODING:
+                assert self.encoding == None
+                self.encoding = t_string
+                continue
 
             if t_type == tokenize.OP:
                 if t_string == "(":
@@ -936,7 +948,7 @@ class TokenPrinter:
                         self.pending.append(self.gen_noop_line() + "\n")
                         self.pending_indent = self.indent
                     else:
-                        sys.stdout.write("\n")
+                        sys.stdout.buffer.write(b"\n")
                 self.pending_newlines = 0
 
             if t_type == tokenize.NL:
@@ -944,7 +956,7 @@ class TokenPrinter:
                     self.pending.append(self.gen_noop_line() + "\n")
                     self.pending_indent = self.indent
                 else:
-                    sys.stdout.write("\n")
+                    sys.stdout.buffer.write(b"\n")
                 self.this_lineno += 1
                 if self.commentstate == TokenPrinter.INSIDECOMMENT:
                     self.commentstate = TokenPrinter.AFTERCOMMENT
@@ -952,7 +964,7 @@ class TokenPrinter:
             elif t_type == tokenize.NEWLINE:
                 self.first_on_line = 1
                 self.this_lineno += 1
-                sys.stdout.write("\n")
+                sys.stdout.buffer.write(b"\n")
                 if self.commentstate == TokenPrinter.INSIDECOMMENT:
                     self.commentstate = TokenPrinter.AFTERCOMMENT
                     
@@ -966,27 +978,24 @@ class TokenPrinter:
                 
                 if self.first_on_line:
                     if self.commentstate in [TokenPrinter.BEFORECOMMENT, TokenPrinter.INSIDECOMMENT]:
-                        # Output comment. Only old Python includes newline. 
-                        if sys.hexversion >= 0x2040000: 
-                            t_string += "\n"
+                        # Output comment
+                        t_string += "\n"
                         self.line_append(t_string)
                     elif conf.blanks != conf.KEEP_BLANKS:
                         self.pending.append(self.gen_noop_line() + "\n")
                         self.pending_indent = self.indent
                     else:
-                        sys.stdout.write("\n")
+                        sys.stdout.buffer.write(b"\n")
                         
                     self.this_lineno += 1
                 else:
-                    if sys.hexversion >= 0x2040000: 
-                        sys.stdout.write("\n")
-                        self.this_lineno += 1
+                    sys.stdout.buffer.write(b"\n")
+                    self.this_lineno += 1
 
                 # tokenizer does not generate a NEWLINE after comment
                 self.first_on_line = 1
-                if sys.hexversion >= 0x2040000:
-                    # tokinizer generates NL after each COMMENT
-                    self.skip_token = 1
+                # tokinizer generates NL after each COMMENT
+                self.skip_token = 1
             elif t_type == tokenize.STRING:
                 if self.first_on_line:
                     # Skip over docstrings
@@ -1013,19 +1022,21 @@ class TokenPrinter:
                 
 
     def line_append(self, s):
+        assert self.encoding != None
         if self.pending:
             indent = max(self.indent, self.pending_indent)
-            self.pending = map(lambda row: " "*indent + row,
-                               self.pending)
+            self.pending = [row.encode(self.encoding) for row in self.pending]
+            self.pending = [b" "*indent + row for row in self.pending]
             if conf.blanks == conf.OBFUSCATE_BLANKS:
-                sys.stdout.write(''.join(self.pending))
+                sys.stdout.buffer.write(b''.join(self.pending))
             self.pending = []
         
         if self.first_on_line:
-            sys.stdout.write(" "*self.indent)
+            sys.stdout.buffer.write(b" "*self.indent)
         else:
-            sys.stdout.write(" "*TOKENBLANKS)
-        sys.stdout.write(s)
+            sys.stdout.buffer.write(b" "*TOKENBLANKS)
+
+        sys.stdout.buffer.write(s.encode(self.encoding))
         self.first_on_line = 0
 
 
@@ -1045,31 +1056,8 @@ class TokenPrinter:
         return result
 
 
-
-def strip_encoding(source):
-    f = StringIO.StringIO(source)
-    lines = [f.readline(), f.readline()]
-    buf = ""
-    for line in lines:
-        if re.search("coding[:=]\s*([-\w_.]+)", line):
-            if line.strip().startswith("#"):
-                # Add a empty line instead
-                buf += "\n"
-            else:
-                # Gosh, not a comment.
-                print >>sys.stderr, "ERROR: Python 2.3 with coding declaration in non-comment!"
-                sys.exit(1)
-        else:
-            # Coding declaration not found on this line; add
-            # unmodified
-            buf += line
-
-    return buf + f.read()
-
-
-
 def usage():
-    print >>sys.stderr, """
+    print("""
 Usage:
     
 pyobfuscate [options] <file>
@@ -1086,7 +1074,7 @@ Options:
 -a, --allpublic	        When __all__ is missing, assume everything is public.
                         The default is to assume nothing is public. 
 -v, --verbose	        Verbose mode.
-"""
+""", file=sys.stderr)
 
 
 class Configuration:
@@ -1102,8 +1090,8 @@ class Configuration:
                                         "verbose"])
             if len(args) != 1:
                 raise getopt.GetoptError("A filename is required", "")
-        except getopt.GetoptError, e:
-            print >>sys.stderr, "Error:", e
+        except getopt.GetoptError as e:
+            print("Error:", e, file=sys.stderr)
             usage()
             sys.exit(2)
 
@@ -1140,18 +1128,10 @@ def main():
     global conf
     conf = Configuration()
     random.seed(conf.seed)
-
-    source = open(conf.file, 'rU').read()
-
-    if sys.version_info[:2] == (2, 3):
-        # Enable Python 2.3 workaround for bug 898271.
-        source_no_encoding = strip_encoding(source)
-    else:
-        source_no_encoding = source
-        
+    source = open(conf.file, mode='rb').read()
 
     # Step 1: Extract __all__ from source. 
-    pae = PubApiExtractor(source_no_encoding)
+    pae = PubApiExtractor(source)
 
 
     # Step 2: Walk the CST tree. The result of this step is a
@@ -1160,7 +1140,7 @@ def main():
     # this symbol on this line. A 1 in this list means that the
     # occurance should be obfuscated; 0 means not. Example: {64:
     # {'foo': [0, 1], 'run': [0]}
-    cw = CSTWalker(source_no_encoding, pae.pubapi)
+    cw = CSTWalker(source, pae.pubapi)
 
 
     # Step 3: We need those column numbers! Use the tokenize module to
@@ -1182,7 +1162,7 @@ def main():
     
     # Step 5: Output a marker that makes it possible to recognize
     # obfuscated files
-    print "# dd678faae9ac167bc83abf78e5cb2f3f0688d3a3"
+    print("# dd678faae9ac167bc83abf78e5cb2f3f0688d3a3")
 
 if __name__ == "__main__":
     main()
