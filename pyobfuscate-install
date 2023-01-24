@@ -55,14 +55,17 @@ def main():
         else:
             rest.append(arg)
 
-    source = rest[0]
-    dest = rest[1]
+    source = rest[-2]
+    dest = rest[-1]
+    rest = rest[:-2]
 
     if os.path.isdir(dest):
         dest = os.path.join(dest, os.path.basename(source))
 
-    cmd = os.path.join(origin, "pyobfuscate")
-    cmd += " " + source + " >" + dest
+    cmd = [os.path.join(origin, "pyobfuscate")]
+    cmd.extend(rest)
+    cmd.extend([source, ">", dest])
+    cmd = " ".join(cmd)
     print("Calling", cmd, file=sys.stderr)
     retcode = os.system(cmd)
     os.chmod(dest, mode)
