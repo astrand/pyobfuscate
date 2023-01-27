@@ -19,6 +19,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
+import io
 import sys
 import token
 import keyword
@@ -28,6 +29,7 @@ import random
 import symtable
 import io
 import getopt
+import string
 
 # Python 3.9+ is needed for ast to fully replace parser, so ignore these
 # deprecation warnings for now
@@ -48,6 +50,46 @@ def get_source_encoding(source):
 
     assert t_type == tokenize.ENCODING
     return t_string
+
+
+class FStringReplacer:
+    "Convert f-string statements"
+    def __init__(self, source):
+        osf = io.BytesIO(source)
+        result = []
+        last_was_fstring = False
+        for tok in tokenize.tokenize(osf.readline):
+            if tok.type == tokenize.STRING and tok.string.startswith("f"):
+                if last_was_fstring:
+                    new_string = "+"
+                else:
+                    new_string = ""
+                last_was_fstring = True
+                formatter = string.Formatter()
+                fcount = 0
+                expressions = []
+                for literal_text, field_name, format_spec, conversion in formatter.parse(tok.string[1:]):
+                    new_string += literal_text
+                    if field_name is not None:
+                        expressions.append(field_name)
+                        new_string += '{' + f"{fcount}"
+                        fcount += 1
+                        if conversion is not None:
+                            new_string += "!" + conversion
+                        if format_spec:
+                            new_string += ":" + format_spec
+                        new_string += '}'
+
+                expressions = ",".join(expressions)
+                new_string += f".format({expressions})"
+                result.append((tok.type, new_string, tok.start, tok.end, tok.line))
+            elif tok.type == tokenize.NL:
+                result.append(tok)
+            else:
+                last_was_fstring = False
+                result.append(tok)
+        self.source = tokenize.untokenize(result)
+
 
 class NameTranslator:
     def __init__(self):
@@ -1129,6 +1171,10 @@ def main():
     conf = Configuration()
     random.seed(conf.seed)
     source = open(conf.file, mode='rb').read()
+
+    # Step 0: Convert f-strings to "".format()
+    fsr = FStringReplacer(source)
+    source = fsr.source
 
     # Step 1: Extract __all__ from source. 
     pae = PubApiExtractor(source)
