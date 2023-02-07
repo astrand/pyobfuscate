@@ -30,6 +30,7 @@ param2=42
 
         self.assertEqual(f"a {value} "
                          f"b {globalval} ", "a 17 b 999 ")
+        self.assertEqual(f"{{ {value} }}", "{ 17 }")
         
 
 if "__main__" == __name__:

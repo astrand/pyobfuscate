@@ -69,7 +69,7 @@ class FStringReplacer:
                 fcount = 0
                 expressions = []
                 for literal_text, field_name, format_spec, conversion in formatter.parse(tok.string[1:]):
-                    new_string += literal_text
+                    new_string += literal_text.replace("{", "{{").replace("}", "}}")
                     if field_name is not None:
                         expressions.append(field_name)
                         new_string += '{' + f"{fcount}"
