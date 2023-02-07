@@ -1040,12 +1040,13 @@ class TokenPrinter:
                 self.skip_token = 1
             elif t_type == tokenize.STRING:
                 if self.first_on_line:
-                    # Skip over docstrings
+                    # Skip over docstrings, unless this looks like a Swagger interface
                     # FIXME: This simple approach fails with:
                     # "foo"; print 3
                     if self.paren_count > 0 or \
                        self.curly_count > 0 or \
-                       self.square_count > 0:
+                       self.square_count > 0 or \
+                       ("---" in t_string and "description:" in t_string):
                         self.line_append(t_string)
                         self.this_lineno += t_string.count("\n")
                     else:
