@@ -237,6 +237,8 @@ class CSTWalker:
             self.handle_dotted_name(elements, symtabs)
         elif production == symbol.global_stmt:
             self.handle_global_stmt(elements, symtabs)
+        elif production == symbol.nonlocal_stmt:
+            self.handle_nonlocal_stmt(elements, symtabs)
         elif production == symbol.atom:
             self.handle_atom(elements, symtabs)
         elif production == symbol.trailer:
@@ -298,6 +300,7 @@ class CSTWalker:
             print("  Imported:", s.is_imported(), file=sys.stderr)
             print("  Parameter:", s.is_parameter(), file=sys.stderr)
             print("  Global:", s.is_global(), file=sys.stderr)
+            print("  Nonlocal:", s.is_nonlocal(), file=sys.stderr)
             print("  Local:", s.is_local(), file=sys.stderr)
 
         # Explicit imports are a clear no
@@ -619,6 +622,39 @@ class CSTWalker:
         for node in elements:
             self.walk(node, symtabs)
         
+
+    def handle_nonlocal_stmt(self, elements, symtabs):
+        # nonlocal_stmt: 'nonlocal' NAME (',' NAME)*
+        # elements is something like:
+        # (293, (1, 'nonlocal', 41), (1, 'foo', 41))
+        # or
+        # (293, (1, 'nonlocal', 32), (1, 'aaaa', 32), (12, ',', 32), (1, 'bbbb', 32))
+        nlname = elements[1]
+        assert nlname[0] == token.NAME
+        nlid = nlname[1]
+        assert nlid == "nonlocal"
+
+        name1 = elements[2]
+        assert name1[0] == token.NAME
+        id1 = name1[1]
+        line1 = name1[2]
+        obfuscate = self.should_obfuscate(id1, symtabs)
+        self.addToNames(line1, id1, obfuscate)
+
+        # Sequence length should be odd
+        assert (len(elements) % 2)
+        for x in range(3, len(elements), 2):
+            comma = elements[x]
+            name = elements[x+1]
+            assert comma[0] == token.COMMA
+            assert name[0] == token.NAME
+            id = name[1]
+            line = name[2]
+            obfuscate = id not in self.pubapi
+            self.addToNames(line, id, obfuscate)
+        for node in elements:
+            self.walk(node, symtabs)
+
 
     def handle_atom(self, elements, symtabs):
         # atom: ... | NAME | ...
