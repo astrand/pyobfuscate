@@ -30,6 +30,7 @@ import symtable
 import io
 import getopt
 import string
+import hashlib
 
 # Python 3.9+ is needed for ast to fully replace parser, so ignore these
 # deprecation warnings for now
@@ -1147,6 +1148,8 @@ Options:
 -i, --indent <num>      Indentation to use. Default is 1. 
 -s, --seed <seed>       Seed to use for name randomization. Default is
                         system time. 
+-S, --seed-content      Use the contents of the input file as the seed for the
+                        randomization. Overrides -s.
 -r, --removeblanks      Remove blank lines, instead of obfuscate
 -k, --keepblanks        Keep blank lines, instead of obfuscate
 -f, --firstcomment      Remove first block of comments as well
@@ -1155,7 +1158,6 @@ Options:
 -v, --verbose	        Verbose mode.
 """, file=sys.stderr)
 
-
 class Configuration:
     KEEP_BLANKS = 0
     OBFUSCATE_BLANKS = 1
@@ -1163,8 +1165,8 @@ class Configuration:
     
     def __init__(self):
         try:
-            opts, args = getopt.getopt(sys.argv[1:], "hi:s:rkfav",
-                                       ["help", "indent=", "seed=", "removeblanks",
+            opts, args = getopt.getopt(sys.argv[1:], "hi:s:Srkfav",
+                                       ["help", "indent=", "seed=", "seed-content", "removeblanks",
                                         "keepblanks", "firstcomment", "allpublic",
                                         "verbose"])
             if len(args) != 1:
@@ -1200,6 +1202,13 @@ class Configuration:
                 self.allpublic = True
             if o == ("-v", "--verbose"):
                 self.verbose = True
+
+        # Some options take precedence over others.
+        for o, a in opts:
+            if o in ("-S", "--seed-content"):
+                with open(self.file, "rb") as f:
+                    self.seed = hashlib.sha256(f.read()).hexdigest()
+
 
     
 
